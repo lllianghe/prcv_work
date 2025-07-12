@@ -73,7 +73,7 @@ def build_dataloader(args, tranforms=None):
 
     num_workers = args.num_workers
     dataset = __factory[args.dataset_name](root=args.root_dir)
-    num_classes = len(dataset.train_id_container)
+    num_classes = len(dataset.train_id_container) # 训练时用的pid数量
     
     if args.training:
         train_transforms = build_transforms(img_size=args.img_size,
@@ -121,10 +121,11 @@ def build_dataloader(args, tranforms=None):
                                       shuffle=True,
                                       num_workers=num_workers,
                                       collate_fn=collate)
+            # collate将多个样本整理成一个批次
         else:
             logger.error('unsupported sampler! expected softmax or triplet but got {}'.format(args.sampler))
 
-        # use test set as validate set
+        # use test set as validate set 将测试集当验证集
         ds = dataset.val if args.val_dataset == 'val' else dataset.test
         val_img_set = ImageDataset(ds['image_pids'], ds['img_paths'],
                                    val_transforms)
@@ -144,14 +145,14 @@ def build_dataloader(args, tranforms=None):
         return train_loader, val_img_loader, val_txt_loader, num_classes
 
     else:
-        # build dataloader for testing
+        # build dataloader for testing 
         if tranforms:
             test_transforms = tranforms
         else:
             test_transforms = build_transforms(img_size=args.img_size,
                                                is_train=False)
 
-        ds = dataset.test
+        ds = dataset.test #还是用的是测试集
         test_img_set = ImageDataset(ds['image_pids'], ds['img_paths'],
                                     test_transforms)
         test_txt_set = TextDataset(ds['caption_pids'],

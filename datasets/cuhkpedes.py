@@ -52,13 +52,20 @@ class CUHKPEDES(BaseDataset):
     def _split_anno(self, anno_path: str):
         train_annos, test_annos, val_annos = [], [], []
         annos = read_json(anno_path)
+        train_num = 0
+        test_num = 0
+        val_num = 0
         for anno in annos:
             if anno['split'] == 'train':
                 train_annos.append(anno)
+                train_num += 1
             elif anno['split'] == 'test':
                 test_annos.append(anno)
+                test_num += 1
             else:
                 val_annos.append(anno)
+                val_num += 1
+        print(f"train_num: {train_num}, test_num: {test_num}, val_num: {val_num}")
         return train_annos, test_annos, val_annos
 
   

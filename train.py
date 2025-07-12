@@ -52,7 +52,7 @@ if __name__ == '__main__':
 
     # get image-text pair datasets dataloader
     train_loader, val_img_loader, val_txt_loader, num_classes = build_dataloader(args)
-    model = build_model(args, num_classes)
+    model = build_model(args, num_classes) # num_classes是训练集中行人的身份数量
     logger.info('Total params: %2.fM' % (sum(p.numel() for p in model.parameters()) / 1000000.0))
     model.to(device)
 

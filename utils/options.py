@@ -23,10 +23,10 @@ def get_args():
     parser.add_argument("--masked_token_rate", type=float, default=0.8, help="masked token rate for mlm task")
     parser.add_argument("--masked_token_unchanged_rate", type=float, default=0.1, help="masked token unchanged rate")
     parser.add_argument("--lr_factor", type=float, default=5.0, help="lr factor for random init self implement module")
-    parser.add_argument("--MLM", default=True, action='store_true', help="whether to use Mask Language Modeling dataset")
+    parser.add_argument("--MLM", default=False, action='store_true', help="whether to use Mask Language Modeling dataset") #暂时删除mlm功能 下面的loss_names也删了mlm
 
     ######################## loss settings ########################
-    parser.add_argument("--loss_names", default='sdm+mlm+id', help="which loss to use ['mlm', 'cmpm', 'id', 'itc', 'sdm']")
+    parser.add_argument("--loss_names", default='sdm+id', help="which loss to use ['mlm', 'cmpm', 'id', 'itc', 'sdm']")
     parser.add_argument("--mlm_loss_weight", type=float, default=1.0, help="mlm loss weight")
     parser.add_argument("--id_loss_weight", type=float, default=1.0, help="id loss weight")
     

@@ -3,3 +3,4 @@ data_files/
 run_irra.sh
 train.sh
 **/__pycache__/
+other_files/

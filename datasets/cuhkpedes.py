@@ -52,20 +52,13 @@ class CUHKPEDES(BaseDataset):
     def _split_anno(self, anno_path: str):
         train_annos, test_annos, val_annos = [], [], []
         annos = read_json(anno_path)
-        train_num = 0
-        test_num = 0
-        val_num = 0
         for anno in annos:
             if anno['split'] == 'train':
                 train_annos.append(anno)
-                train_num += 1
             elif anno['split'] == 'test':
                 test_annos.append(anno)
-                test_num += 1
             else:
                 val_annos.append(anno)
-                val_num += 1
-        print(f"train_num: {train_num}, test_num: {test_num}, val_num: {val_num}")
         return train_annos, test_annos, val_annos
 
   
@@ -83,7 +76,7 @@ class CUHKPEDES(BaseDataset):
                     dataset.append((pid, image_id, img_path, caption))
                 image_id += 1
             for idx, pid in enumerate(pid_container):
-                # check pid begin from 0 and no break
+                # check pid begin from 0 and no break 要求pid必须连续
                 assert idx == pid, f"idx: {idx} and pid: {pid} are not match"
             return dataset, pid_container
         else:

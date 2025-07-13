@@ -9,12 +9,13 @@ from torch.utils.data.distributed import DistributedSampler
 from utils.comm import get_world_size
 
 from .bases import ImageDataset, TextDataset, ImageTextDataset, ImageTextMLMDataset
-
+from .bases_or import ORBenchTrainDataset,ORBenchQueryDataset,ORBenchGalleryDataset
 from .cuhkpedes import CUHKPEDES
 from .icfgpedes import ICFGPEDES
 from .rstpreid import RSTPReid
+from .orbench import ORBENCH
 
-__factory = {'CUHK-PEDES': CUHKPEDES, 'ICFG-PEDES': ICFGPEDES, 'RSTPReid': RSTPReid}
+__factory = {'CUHK-PEDES': CUHKPEDES, 'ICFG-PEDES': ICFGPEDES, 'RSTPReid': RSTPReid, 'ORBench': ORBENCH}
 
 
 def build_transforms(img_size=(384, 128), aug=False, is_train=True):
@@ -81,15 +82,19 @@ def build_dataloader(args, tranforms=None):
                                             is_train=True)
         val_transforms = build_transforms(img_size=args.img_size,
                                           is_train=False)
-
-        if args.MLM:
-            train_set = ImageTextMLMDataset(dataset.train,
-                                     train_transforms,
-                                     text_length=args.text_length)
+        if args.dataset_name== 'ORBench':
+            train_set = ORBenchTrainDataset(dataset.train,
+                            train_transforms,
+                            text_length=args.text_length)
         else:
-            train_set = ImageTextDataset(dataset.train,
+            if args.MLM:
+                train_set = ImageTextMLMDataset(dataset.train,
                                      train_transforms,
                                      text_length=args.text_length)
+            else:
+                train_set = ImageTextDataset(dataset.train,
+                                    train_transforms,
+                                    text_length=args.text_length)
 
         if args.sampler == 'identity':
             if args.distributed:
@@ -116,6 +121,7 @@ def build_dataloader(args, tranforms=None):
         elif args.sampler == 'random': # 使用ramdom sampler
             # TODO add distributed condition
             logger.info('using random sampler')
+            # 每次训练时都会将数据随机打乱
             train_loader = DataLoader(train_set,
                                       batch_size=args.batch_size,
                                       shuffle=True,
@@ -125,13 +131,23 @@ def build_dataloader(args, tranforms=None):
         else:
             logger.error('unsupported sampler! expected softmax or triplet but got {}'.format(args.sampler))
 
-        # use test set as validate set 将测试集当验证集
+        # use test set as validate set 将测试集当验证集 这部分是要改的
         ds = dataset.val if args.val_dataset == 'val' else dataset.test
-        val_img_set = ImageDataset(ds['image_pids'], ds['img_paths'],
-                                   val_transforms)
-        val_txt_set = TextDataset(ds['caption_pids'],
-                                  ds['captions'],
-                                  text_length=args.text_length)
+        if args.dataset_name == 'ORBench':
+            val_img_set = ORBenchGalleryDataset(ds['image_pids'],ds['vis_img_paths'],val_transforms)
+            val_txt_set = ORBenchQueryDataset(ds['caption_pids'],
+                                     ds['captions'], 
+                                     ds['cp_paths'], 
+                                     ds['sk_paths'], 
+                                     ds['nir_paths'],
+                                     transform = val_transforms,
+                                     text_length=args.text_length)
+        else:
+            val_img_set = ImageDataset(ds['image_pids'], ds['img_paths'],
+                                    val_transforms)
+            val_txt_set = TextDataset(ds['caption_pids'],
+                                    ds['captions'],
+                                    text_length=args.text_length)
 
         val_img_loader = DataLoader(val_img_set,
                                     batch_size=args.batch_size,
@@ -141,7 +157,6 @@ def build_dataloader(args, tranforms=None):
                                     batch_size=args.batch_size,
                                     shuffle=False,
                                     num_workers=num_workers)
-
         return train_loader, val_img_loader, val_txt_loader, num_classes
 
     else:

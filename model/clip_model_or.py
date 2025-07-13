@@ -424,23 +424,14 @@ class CLIP(nn.Module):
 
         return x
 
-    def forward(self, image, text):
-        image_features = self.encode_image(image)   # transformer编码器
-        text_features = self.encode_text(text)   # transforner编码器
-        
-        # # normalized features
-        # image_features = image_features / image_features.norm(dim=-1, keepdim=True)
-        # text_features = text_features / text_features.norm(dim=-1, keepdim=True)
-
-        # # cosine similarity as logits
-        # logit_scale = self.logit_scale.exp()
-        # logits_per_image = logit_scale * image_features @ text_features.t()
-        # logits_per_text = logits_per_image.t()
-
-        # # shape = [global_batch_size, global_batch_size]
-        # return logits_per_image, logits_per_text
-
-        return image_features, text_features
+    def forward(self, vis_images, cp_images, sk_images, nir_images, text):
+        # 对四种图像模态分别提取特征
+        vis_img_feats = self.encode_image(vis_images)   # 对真实图像提取特征
+        cp_img_feats = self.encode_image(cp_images)     # 对彩铅图像提取特征
+        sk_img_feats = self.encode_image(sk_images)     # 对素描图像提取特征
+        nir_img_feats = self.encode_image(nir_images)   # 对红外图像提取特征
+        text_feats = self.encode_text(text)             # 对文本提取特征
+        return vis_img_feats, cp_img_feats, sk_img_feats, nir_img_feats, text_feats
     
     
     def load_param(self, state_dict):

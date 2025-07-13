@@ -1,5 +1,5 @@
 import os
-os.environ["CUDA_VISIBLE_DEVICES"] = "3"  #具体看哪个gpu空闲
+os.environ["CUDA_VISIBLE_DEVICES"] = "7"  #具体看哪个gpu空闲
 import os.path as op
 import torch
 import numpy as np
@@ -13,7 +13,7 @@ from utils.iotools import save_train_configs
 from utils.logger import setup_logger
 from solver import build_optimizer, build_lr_scheduler
 from model import build_model
-from utils.metrics import Evaluator
+from utils.metrics import Evaluator, Evaluator_OR
 from utils.options import get_args
 from utils.comm import get_rank, synchronize
 
@@ -69,8 +69,10 @@ if __name__ == '__main__':
 
     is_master = get_rank() == 0 #分布式的获取进程排名 如不开启分布式训练 则定义为0
     checkpointer = Checkpointer(model, optimizer, scheduler, args.output_dir, is_master) #负责模型加载保存
-    evaluator = Evaluator(val_img_loader, val_txt_loader) # 用于评估检索性能的类
-
+    if args.dataset_name == 'ORBench':
+        evaluator = Evaluator_OR(val_img_loader, val_txt_loader) # 用于评估检索性能的类
+    else:
+        evaluator = Evaluator(val_img_loader, val_txt_loader)
     start_epoch = 1
     if args.resume:  # 可以在断点处开始训练
         checkpoint = checkpointer.resume(args.resume_ckpt_file)

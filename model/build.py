@@ -1,15 +1,24 @@
 from model import objectives
-from .clip_model import Transformer, QuickGELU, LayerNorm, build_CLIP_from_openai_pretrained, convert_weights
+from .clip_model import convert_weights
 import numpy as np
 import torch
 import torch.nn as nn
 from collections import OrderedDict
+import importlib
+
+
 
 # 主模型
 class IRRA(nn.Module):
     def __init__(self, args, num_classes=11003):
         super().__init__()
         self.args = args
+        if args.dataset_name == "ORBench":
+            from .clip_model_or import Transformer, QuickGELU, LayerNorm, build_CLIP_from_openai_pretrained, convert_weights
+        else:
+            # 原先的导入方法
+            from .clip_model import Transformer, QuickGELU, LayerNorm, build_CLIP_from_openai_pretrained, convert_weights
+
         self.num_classes = num_classes
         self._set_task()
 
@@ -89,17 +98,34 @@ class IRRA(nn.Module):
 
     def forward(self, batch):
         ret = dict()
-
-        images = batch['images']
-        caption_ids = batch['caption_ids']
-        image_feats, text_feats = self.base_model(images, caption_ids)
-        i_feats = image_feats[:, 0, :].float() # 选择第一个特征
-        # i_feats = image_feats.float() # for CLIP ResNet visual model
-        t_feats = text_feats[torch.arange(text_feats.shape[0]), caption_ids.argmax(dim=-1)].float()
+        if self.args.dataset_name == 'ORBench':
+            vis_images = batch['vis_images']
+            cp_images = batch['cp_images']
+            sk_images = batch['sk_images']
+            nir_images = batch['nir_images']
+            caption_ids = batch['caption_ids']
+            vis_img_feats, cp_img_feats, sk_img_feats, nir_img_feats, text_feats = self.base_model(
+                vis_images, cp_images, sk_images, nir_images, caption_ids
+            )
+            vis_img_feat = vis_img_feats[:,0,:].float()
+            cp_img_feat = cp_img_feats[:,0,:].float()
+            sk_img_feat = sk_img_feats[:,0,:].float()
+            nir_img_feat = nir_img_feats[:,0,:].float()
+            text_feat = text_feats[torch.arange(text_feats.shape[0]), caption_ids.argmax(dim=-1)].float()
+            i_feats = vis_img_feat
+            t_feats = (text_feat + cp_img_feat+sk_img_feat+nir_img_feat) * 0.25
+           
+        else:
+            images = batch['images']
+            caption_ids = batch['caption_ids']
+            image_feats, text_feats = self.base_model(images, caption_ids)
+            i_feats = image_feats[:, 0, :].float() # 选择第一个特征
+            # i_feats = image_feats.float() # for CLIP ResNet visual model
+            t_feats = text_feats[torch.arange(text_feats.shape[0]), caption_ids.argmax(dim=-1)].float()
 
         logit_scale = self.logit_scale
         ret.update({'temperature': 1 / logit_scale})
-
+        # 输入模态的融合特征为t_feats, 真实照片的特征为i_feats
         if 'itc' in self.current_task:
             ret.update({'itc_loss':objectives.compute_itc(i_feats, t_feats, logit_scale)})
         

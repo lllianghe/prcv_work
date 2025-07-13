@@ -54,8 +54,9 @@ def do_train(start_epoch, args, model, train_loader, evaluator, optimizer,
             logger.info(f"Iteration {n_iter + 1}/{len(train_loader)} - Allocated memory: {allocated_memory:.2f} GB, Cached memory: {cached_memory:.2f} GB")
             ret = model(batch)
             total_loss = sum([v for k, v in ret.items() if "loss" in k]) # 计算损失函数 损失在模型中计算好了
-
-            batch_size = batch['images'].shape[0]
+            if args.dataset_name == 'ORBench':
+                batch_size = batch['vis_images'].shape[0]
+            else: batch_size = batch['images'].shape[0]
             meters['loss'].update(total_loss.item(), batch_size)
             meters['sdm_loss'].update(ret.get('sdm_loss', 0), batch_size)
             meters['itc_loss'].update(ret.get('itc_loss', 0), batch_size)

@@ -99,3 +99,76 @@ class Evaluator():
         self.logger.info('\n' + str(table))
         
         return t2i_cmc[0]
+
+
+
+class Evaluator_OR():
+    def __init__(self, img_loader, txt_loader):
+        self.img_loader = img_loader # gallery
+        self.txt_loader = txt_loader # query
+        self.logger = logging.getLogger("IRRA.eval")
+
+    def _compute_embedding(self, model):
+        model = model.eval()
+        device = next(model.parameters()).device
+
+        qids, gids, qfeats, gfeats = [], [], [], []
+        # text
+        for pid, cp_img, sk_img, nir_img, caption in self.txt_loader:
+            caption = caption.to(device)
+            with torch.no_grad():
+                text_feat = model.encode_text(caption)
+            
+            with torch.no_grad():
+                cp_img = cp_img.to(device)
+                sk_img = sk_img.to(device)
+                nir_img = nir_img.to(device)
+                cp_feat = model.encode_image(cp_img)
+                sk_feat = model.encode_image(sk_img)
+                nir_feat = model.encode_image(nir_img)
+            img_feats = (text_feat+cp_feat+sk_feat+nir_feat)/4
+            qids.append(pid.view(-1))  # Flatten the pid tensor
+            qfeats.append(img_feats)  #
+        qids = torch.cat(qids, 0)
+        qfeats = torch.cat(qfeats, 0)
+
+
+        # image
+        for pid, img in self.img_loader:
+            img = img.to(device)
+            with torch.no_grad():
+                img_feat = model.encode_image(img)
+            gids.append(pid.view(-1)) # flatten 
+            gfeats.append(img_feat)
+        gids = torch.cat(gids, 0)
+        gfeats = torch.cat(gfeats, 0)
+
+        return qfeats, gfeats, qids, gids
+    
+    def eval(self, model, i2t_metric=False):
+
+        qfeats, gfeats, qids, gids = self._compute_embedding(model)
+
+        qfeats = F.normalize(qfeats, p=2, dim=1) # text features
+        gfeats = F.normalize(gfeats, p=2, dim=1) # image features
+
+        similarity = qfeats @ gfeats.t()
+
+        t2i_cmc, t2i_mAP, t2i_mINP, _ = rank(similarity=similarity, q_pids=qids, g_pids=gids, max_rank=10, get_mAP=True)
+        t2i_cmc, t2i_mAP, t2i_mINP = t2i_cmc.numpy(), t2i_mAP.numpy(), t2i_mINP.numpy()
+        table = PrettyTable(["task", "R1", "R5", "R10", "mAP", "mINP"])
+        table.add_row(['t2i', t2i_cmc[0], t2i_cmc[4], t2i_cmc[9], t2i_mAP, t2i_mINP])
+
+        if i2t_metric:
+            i2t_cmc, i2t_mAP, i2t_mINP, _ = rank(similarity=similarity.t(), q_pids=gids, g_pids=qids, max_rank=10, get_mAP=True)
+            i2t_cmc, i2t_mAP, i2t_mINP = i2t_cmc.numpy(), i2t_mAP.numpy(), i2t_mINP.numpy()
+            table.add_row(['i2t', i2t_cmc[0], i2t_cmc[4], i2t_cmc[9], i2t_mAP, i2t_mINP])
+        # table.float_format = '.4'
+        table.custom_format["R1"] = lambda f, v: f"{v:.3f}"
+        table.custom_format["R5"] = lambda f, v: f"{v:.3f}"
+        table.custom_format["R10"] = lambda f, v: f"{v:.3f}"
+        table.custom_format["mAP"] = lambda f, v: f"{v:.3f}"
+        table.custom_format["mINP"] = lambda f, v: f"{v:.3f}"
+        self.logger.info('\n' + str(table))
+        
+        return t2i_cmc[0]

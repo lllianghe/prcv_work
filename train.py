@@ -1,5 +1,4 @@
 import os
-os.environ["CUDA_VISIBLE_DEVICES"] = "7"  #具体看哪个gpu空闲
 import os.path as op
 import torch
 import numpy as np

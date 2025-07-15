@@ -1,6 +1,6 @@
 logs/
 data_files/
-run_irra.sh
-train.sh
 **/__pycache__/
 other_files/
+model_cache/
+model_structure/

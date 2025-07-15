@@ -5,6 +5,7 @@ import torch
 import torch.nn as nn
 from collections import OrderedDict
 import importlib
+import os
 
 
 
@@ -22,8 +23,9 @@ class IRRA(nn.Module):
         self.num_classes = num_classes
         self._set_task()
 
-        self.base_model, base_cfg = build_CLIP_from_openai_pretrained(args.pretrain_choice, args.img_size, args.stride_size)
+        self.base_model, base_cfg = build_CLIP_from_openai_pretrained(name = args.pretrain_choice, image_size = args.img_size, stride_size = args.stride_size)
         self.embed_dim = base_cfg['embed_dim']
+        self.is_safetensors = os.path.splitext(args.pretrain_choice)[1].lstrip('.') == 'safetensors'
 
         self.logit_scale = torch.ones([]) * (1 / args.temperature) 
 
@@ -89,12 +91,18 @@ class IRRA(nn.Module):
 
     def encode_image(self, image):
         x = self.base_model.encode_image(image)
-        return x[:, 0, :].float()
+        if self.is_safetensors:
+            return x.float()
+        else:
+            return x[:, 0, :].float()
         # return x.float() # for CLIP ResNet visual model
 
     def encode_text(self, text):
         x = self.base_model.encode_text(text)
-        return x[torch.arange(x.shape[0]), text.argmax(dim=-1)].float()
+        if self.is_safetensors:
+            return x
+        else:
+            return x[torch.arange(x.shape[0]), text.argmax(dim=-1)].float()
 
     def forward(self, batch):
         ret = dict()
@@ -107,11 +115,18 @@ class IRRA(nn.Module):
             vis_img_feats, cp_img_feats, sk_img_feats, nir_img_feats, text_feats = self.base_model(
                 vis_images, cp_images, sk_images, nir_images, caption_ids
             )
-            vis_img_feat = vis_img_feats[:,0,:].float()
-            cp_img_feat = cp_img_feats[:,0,:].float()
-            sk_img_feat = sk_img_feats[:,0,:].float()
-            nir_img_feat = nir_img_feats[:,0,:].float()
-            text_feat = text_feats[torch.arange(text_feats.shape[0]), caption_ids.argmax(dim=-1)].float()
+            if self.is_safetensors:
+                vis_img_feat = vis_img_feats.float()
+                cp_img_feat = cp_img_feats.float()
+                sk_img_feat = sk_img_feats.float()
+                nir_img_feat = nir_img_feats.float()
+                text_feat = text_feats.float()
+            else:
+                vis_img_feat = vis_img_feats[:,0,:].float()
+                cp_img_feat = cp_img_feats[:,0,:].float()
+                sk_img_feat = sk_img_feats[:,0,:].float()
+                nir_img_feat = nir_img_feats[:,0,:].float()
+                text_feat = text_feats[torch.arange(text_feats.shape[0]), caption_ids.argmax(dim=-1)].float()
             i_feats = vis_img_feat
             t_feats = (text_feat + cp_img_feat+sk_img_feat+nir_img_feat) * 0.25
            
@@ -136,8 +151,12 @@ class IRRA(nn.Module):
             ret.update({'cmpm_loss':objectives.compute_cmpm(i_feats, t_feats, batch['pids'])})
         
         if 'id' in self.current_task:
-            image_logits = self.classifier(i_feats.half()).float()
-            text_logits = self.classifier(t_feats.half()).float()
+            if self.is_safetensors:
+                image_logits = self.classifier(i_feats).float()
+                text_logits = self.classifier(t_feats).float()
+            else:
+                image_logits = self.classifier(i_feats.half()).float()
+                text_logits = self.classifier(t_feats.half()).float()
             ret.update({'id_loss':objectives.compute_id(image_logits, text_logits, batch['pids'])*self.args.id_loss_weight})
 
             image_pred = torch.argmax(image_logits, dim=1)
@@ -171,6 +190,7 @@ class IRRA(nn.Module):
 
 def build_model(args, num_classes=11003):
     model = IRRA(args, num_classes)
-    # covert model to fp16 将模型权重转化为fp16
-    convert_weights(model)
+    # convert model to fp16 将模型权重转化为fp16
+    if os.path.splitext(args.pretrain_choice)[1].lstrip('.') != 'safetensors':
+        convert_weights(model)
     return model

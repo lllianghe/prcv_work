@@ -518,75 +518,93 @@ def build_CLIP_from_openai_pretrained(name: str, image_size: Union[int, Tuple[in
     model : torch.nn.Module
         The CLIP model
     """
+    file_extension = "pt"
     if name in _MODELS:
         model_path = _download(_MODELS[name], download_root or os.path.expanduser("~/.cache/clip"))
     elif os.path.isfile(name):
         model_path = name
+        file_extension = os.path.splitext(model_path)[1].lstrip('.')
     else:
         raise RuntimeError(f"Model {name} not found; available models = {available_models()}")
+    
+    if file_extension == 'safetensors':
+        try:
+            state_dict = None
+            from .fgclip import FGCLIPModel
+            model_folder = os.path.dirname(model_path)
+            model = FGCLIPModel.from_pretrained(model_folder)
+        except Exception as e:
+            raise RuntimeError(f"Failed to load safetensors file {model_path}: {e}")
+        
+        model_cfg = {
+            'embed_dim': 512   # according to the config.json
+        }
+        
+        return model, model_cfg
 
-    try:
-        # loading JIT archive
-        model = torch.jit.load(model_path, map_location="cpu")
-        state_dict = None
-    except RuntimeError:
-        # loading saved state dict
-        if jit:
-            warnings.warn(f"File {model_path} is not a JIT archive. Loading as a state dict instead")
-            jit = False
-        state_dict = torch.load(model_path, map_location="cpu")
+    else :
+        try:
+            # loading JIT archive
+            model = torch.jit.load(model_path, map_location="cpu")
+            state_dict = None
+        except RuntimeError:
+            # loading saved state dict
+            if jit:
+                warnings.warn(f"File {model_path} is not a JIT archive. Loading as a state dict instead")
+                jit = False
+            state_dict = torch.load(model_path, map_location="cpu")
 
-    state_dict = state_dict or model.state_dict()
+        state_dict = state_dict or model.state_dict()
 
-    vit = "visual.proj" in state_dict
+        vit = "visual.proj" in state_dict
 
-    if vit:
-        vision_width = state_dict["visual.conv1.weight"].shape[0]
-        vision_layers = len([k for k in state_dict.keys() if k.startswith("visual.") and k.endswith(".attn.in_proj_weight")])
-        vision_patch_size = state_dict["visual.conv1.weight"].shape[-1]
-        grid_size = round((state_dict["visual.positional_embedding"].shape[0] - 1) ** 0.5)
-        image_resolution = vision_patch_size * grid_size
-    else:
-        counts: list = [len(set(k.split(".")[2] for k in state_dict if k.startswith(f"visual.layer{b}"))) for b in [1, 2, 3, 4]]
-        vision_layers = tuple(counts)
-        vision_width = state_dict["visual.layer1.0.conv1.weight"].shape[0]
-        output_width = round((state_dict["visual.attnpool.positional_embedding"].shape[0] - 1) ** 0.5)
-        vision_patch_size = None
-        assert output_width ** 2 + 1 == state_dict["visual.attnpool.positional_embedding"].shape[0]
-        image_resolution = output_width * 32
+        if vit:
+            vision_width = state_dict["visual.conv1.weight"].shape[0]
+            vision_layers = len([k for k in state_dict.keys() if k.startswith("visual.") and k.endswith(".attn.in_proj_weight")])
+            vision_patch_size = state_dict["visual.conv1.weight"].shape[-1]
+            grid_size = round((state_dict["visual.positional_embedding"].shape[0] - 1) ** 0.5)
+            image_resolution = vision_patch_size * grid_size
+        else:
+            counts: list = [len(set(k.split(".")[2] for k in state_dict if k.startswith(f"visual.layer{b}"))) for b in [1, 2, 3, 4]]
+            vision_layers = tuple(counts)
+            vision_width = state_dict["visual.layer1.0.conv1.weight"].shape[0]
+            output_width = round((state_dict["visual.attnpool.positional_embedding"].shape[0] - 1) ** 0.5)
+            vision_patch_size = None
+            assert output_width ** 2 + 1 == state_dict["visual.attnpool.positional_embedding"].shape[0]
+            image_resolution = output_width * 32
 
-    embed_dim = state_dict["text_projection"].shape[1]
-    context_length = state_dict["positional_embedding"].shape[0]
-    vocab_size = state_dict["token_embedding.weight"].shape[0]
-    transformer_width = state_dict["ln_final.weight"].shape[0]
-    transformer_heads = transformer_width // 64
-    transformer_layers = len(set(k.split(".")[2] for k in state_dict if k.startswith(f"transformer.resblocks")))
+        embed_dim = state_dict["text_projection"].shape[1]
+        context_length = state_dict["positional_embedding"].shape[0]
+        vocab_size = state_dict["token_embedding.weight"].shape[0]
+        transformer_width = state_dict["ln_final.weight"].shape[0]
+        transformer_heads = transformer_width // 64
+        transformer_layers = len(set(k.split(".")[2] for k in state_dict if k.startswith(f"transformer.resblocks")))
 
-    model_cfg = {
-        'embed_dim': embed_dim,
-        'image_resolution': image_resolution,
-        'vision_layers': vision_layers, 
-        'vision_width': vision_width, 
-        'vision_patch_size': vision_patch_size,
-        'context_length': context_length, 
-        'vocab_size': vocab_size, 
-        'transformer_width': transformer_width, 
-        'transformer_heads': transformer_heads, 
-        'transformer_layers': transformer_layers
-    }
+        model_cfg = {
+            'embed_dim': embed_dim,
+            'image_resolution': image_resolution,
+            'vision_layers': vision_layers, 
+            'vision_width': vision_width, 
+            'vision_patch_size': vision_patch_size,
+            'context_length': context_length, 
+            'vocab_size': vocab_size, 
+            'transformer_width': transformer_width, 
+            'transformer_heads': transformer_heads, 
+            'transformer_layers': transformer_layers
+        }
 
 
-    # modify image resolution to adapt Re-ID task
-    model_cfg['image_resolution'] = image_size
-    model_cfg['stride_size'] = stride_size
-    logger.info(f"Load pretrained {name} CLIP model with model config: {model_cfg}")
-    model = CLIP(**model_cfg)
+        # modify image resolution to adapt Re-ID task
+        model_cfg['image_resolution'] = image_size
+        model_cfg['stride_size'] = stride_size
+        logger.info(f"Load pretrained {name} CLIP model with model config: {model_cfg}")
+        model = CLIP(**model_cfg)
 
-    # covert model to fp16
-    # convert_weights(model)
+        # covert model to fp16
+        # convert_weights(model)
 
-    # resize modified pos embedding
-    model.load_param(state_dict)
-    return model, model_cfg
+        # resize modified pos embedding
+        model.load_param(state_dict)
+        return model, model_cfg
 
 

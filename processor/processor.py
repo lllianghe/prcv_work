@@ -2,7 +2,7 @@ import logging
 import time
 import torch
 from utils.meter import AverageMeter
-from utils.metrics import Evaluator
+from utils.metrics import Evaluator, Evaluator_OR
 from utils.comm import get_rank, synchronize
 from torch.utils.tensorboard import SummaryWriter
 from prettytable import PrettyTable
@@ -113,10 +113,10 @@ def do_train(start_epoch, args, model, train_loader, evaluator, optimizer,
         logger.info(f"best R1: {best_top1} at epoch {arguments['epoch']}")
 
 
-def do_inference(model, test_img_loader, test_txt_loader):
+def do_inference(model, test_img_loader, test_txt_loader,modalities):
 
-    logger = logging.getLogger("IRRA.test")
+    logger = logging.getLogger(f"IRRA.test:")
     logger.info("Enter inferencing")
-
-    evaluator = Evaluator(test_img_loader, test_txt_loader)
-    top1 = evaluator.eval(model.eval())
+    # evaluator = Evaluator(test_img_loader, test_txt_loader)
+    evaluator = Evaluator_OR(test_img_loader, test_txt_loader)
+    top1 = evaluator.eval(model.eval(),modalities=modalities)

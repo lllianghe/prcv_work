@@ -108,25 +108,37 @@ class Evaluator_OR():
         self.txt_loader = txt_loader # query
         self.logger = logging.getLogger("IRRA.eval")
 
-    def _compute_embedding(self, model):
+    def _compute_embedding(self, model,modalities):
         model = model.eval()
         device = next(model.parameters()).device
 
         qids, gids, qfeats, gfeats = [], [], [], []
         # text
+        modalities_list = modalities.split("_") 
         for pid, cp_img, sk_img, nir_img, caption in self.txt_loader:
-            caption = caption.to(device)
             with torch.no_grad():
-                text_feat = model.encode_text(caption)
-            
-            with torch.no_grad():
-                cp_img = cp_img.to(device)
-                sk_img = sk_img.to(device)
-                nir_img = nir_img.to(device)
-                cp_feat = model.encode_image(cp_img)
-                sk_feat = model.encode_image(sk_img)
-                nir_feat = model.encode_image(nir_img)
-            img_feats = (text_feat+cp_feat+sk_feat+nir_feat)/4
+                feats = []
+                if 'TEXT' in modalities_list:
+                    caption = caption.to(device)
+                    text_feat = model.encode_text(caption)
+                    feats.append(text_feat)
+
+                # 根据modalities_list来计算图像特征，按需计算
+                if 'CP' in modalities_list:
+                    cp_img = cp_img.to(device)
+                    cp_feat = model.encode_image(cp_img)
+                    feats.append(cp_feat)
+
+                if 'SK' in modalities_list:
+                    sk_img = sk_img.to(device)
+                    sk_feat = model.encode_image(sk_img)
+                    feats.append(sk_feat)
+
+                if 'NIR' in modalities_list:
+                    nir_img = nir_img.to(device)
+                    nir_feat = model.encode_image(nir_img)
+                    feats.append(nir_feat)
+            img_feats = sum(feats) / len(feats) if feats else None  # 避免空列表除以0的错误
             qids.append(pid.view(-1))  # Flatten the pid tensor
             qfeats.append(img_feats)  #
         qids = torch.cat(qids, 0)
@@ -145,9 +157,9 @@ class Evaluator_OR():
 
         return qfeats, gfeats, qids, gids
     
-    def eval(self, model, i2t_metric=False):
+    def eval(self, model, i2t_metric=False,modalities="fourmodal_SK_TEXT_CP_NIR"):
 
-        qfeats, gfeats, qids, gids = self._compute_embedding(model)
+        qfeats, gfeats, qids, gids = self._compute_embedding(model, modalities)
 
         qfeats = F.normalize(qfeats, p=2, dim=1) # text features
         gfeats = F.normalize(gfeats, p=2, dim=1) # image features
@@ -157,7 +169,7 @@ class Evaluator_OR():
         t2i_cmc, t2i_mAP, t2i_mINP, _ = rank(similarity=similarity, q_pids=qids, g_pids=gids, max_rank=10, get_mAP=True)
         t2i_cmc, t2i_mAP, t2i_mINP = t2i_cmc.numpy(), t2i_mAP.numpy(), t2i_mINP.numpy()
         table = PrettyTable(["task", "R1", "R5", "R10", "mAP", "mINP"])
-        table.add_row(['t2i', t2i_cmc[0], t2i_cmc[4], t2i_cmc[9], t2i_mAP, t2i_mINP])
+        table.add_row([modalities, t2i_cmc[0], t2i_cmc[4], t2i_cmc[9], t2i_mAP, t2i_mINP])
 
         if i2t_metric:
             i2t_cmc, i2t_mAP, i2t_mINP, _ = rank(similarity=similarity.t(), q_pids=gids, g_pids=qids, max_rank=10, get_mAP=True)

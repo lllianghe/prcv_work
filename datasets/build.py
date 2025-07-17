@@ -168,11 +168,21 @@ def build_dataloader(args, tranforms=None):
                                                is_train=False)
 
         ds = dataset.test #还是用的是测试集
-        test_img_set = ImageDataset(ds['image_pids'], ds['img_paths'],
-                                    test_transforms)
-        test_txt_set = TextDataset(ds['caption_pids'],
-                                   ds['captions'],
-                                   text_length=args.text_length)
+        if args.dataset_name == 'ORBench':
+            test_img_set = ORBenchGalleryDataset(ds['image_pids'],ds['vis_img_paths'],test_transforms)
+            test_txt_set = ORBenchQueryDataset(ds['caption_pids'],
+                                     ds['captions'], 
+                                     ds['cp_paths'], 
+                                     ds['sk_paths'], 
+                                     ds['nir_paths'],
+                                     transform = test_transforms,
+                                     text_length=args.text_length)
+        else:
+            test_img_set = ImageDataset(ds['image_pids'], ds['img_paths'],
+                                        test_transforms)
+            test_txt_set = TextDataset(ds['caption_pids'],
+                                    ds['captions'],
+                                    text_length=args.text_length)
 
         test_img_loader = DataLoader(test_img_set,
                                      batch_size=args.test_batch_size,

@@ -308,3 +308,5 @@ class ORBenchQueryDataset(Dataset):
             sk_img = self.transform(sk_img)
             nir_img = self.transform(nir_img)
         return pid, cp_img, sk_img, nir_img, caption
+
+

@@ -17,11 +17,12 @@ from utils.iotools import load_train_configs
 
 
 if __name__ == '__main__':
-    parser = argparse.ArgumentParser(description="IRRA Test")
-    parser.add_argument("--config_file", default='logs/CUHK-PEDES/iira/configs.yaml')
+    parser = argparse.ArgumentParser(description="irra Test")
+    parser.add_argument("--config_file", default='logs/ORBench/20250713_134839_irra/configs.yaml')
+    # parser.add_argument("--config_file", default='logs/ORBench/20250715_021439_irra/configs.yaml') #这是fgclip的模型
     args = parser.parse_args()
     args = load_train_configs(args.config_file)
-
+    args.test_batch_size = 256
     args.training = False
     logger = setup_logger('IRRA', save_dir=args.output_dir, if_train=args.training)
     logger.info(args)
@@ -32,4 +33,8 @@ if __name__ == '__main__':
     checkpointer = Checkpointer(model)
     checkpointer.load(f=op.join(args.output_dir, 'best.pth'))
     model.to(device)
-    do_inference(model, test_img_loader, test_txt_loader)
+    modalities = "onemodal_SK"
+    do_inference(model, test_img_loader, test_txt_loader,"onemodal_SK")
+    do_inference(model, test_img_loader, test_txt_loader,"onemodal_NIR")
+    do_inference(model, test_img_loader, test_txt_loader,"onemodal_CP")
+    do_inference(model, test_img_loader, test_txt_loader,"onemodal_TEXT")

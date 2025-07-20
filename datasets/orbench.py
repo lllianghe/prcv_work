@@ -13,7 +13,7 @@ class ORBENCH(BaseDataset):
     """
     dataset_dir = 'ORBench_PRCV'
 
-    def __init__(self, root='', verbose=True):
+    def __init__(self, root='', test_size=150/400 ,verbose=True):
         super(ORBENCH, self).__init__()
         self.dataset_dir = op.join(root, self.dataset_dir)
         self.img_dir = op.join(self.dataset_dir, 'train/')
@@ -21,28 +21,29 @@ class ORBENCH(BaseDataset):
         self.anno_path = op.join(self.dataset_dir, 'train/text_annos.json')
         # self._check_before_run()
 
-        self.train_annos, self.test_annos, self.val_annos = self._split_anno(self.anno_path)
+        self.train_annos, self.test_annos, self.val_annos, id_num = self._split_anno(self.anno_path,test_size=test_size)
 
-        self.train, self.train_id_container = self._process_anno(self.train_annos, training=True)
-        self.test, self.test_id_container = self._process_anno(self.test_annos)
-        self.val, self.val_id_container = self._process_anno(self.val_annos)
+        self.train, self.train_id_container = self._process_anno(self.train_annos,True,first_pid=0)
+        self.test, self.test_id_container = self._process_anno(self.test_annos,False,first_pid = int(id_num*(1-test_size)))
+        self.val, self.val_id_container = self._process_anno(self.val_annos,False,first_pid=id_num)
 
         if verbose:
             self.logger.info("=> CUHK-PEDES Images and Captions are loaded")
             self.show_dataset_info()
 
 
-    def _split_anno(self, anno_path: str):
+    def _split_anno(self, anno_path: str, test_size):
         train_annos, test_annos, val_annos = [], [], []
         annos = read_json(anno_path)
         # 获取所有唯一的 ID
         all_ids = list(set(anno['id'] for anno in annos))
         # 随机打乱所有的 ID
         random.shuffle(all_ids)
-        # 选择 350 个 ID 作为训练集，50 个 ID 作为测试集
-        train_ids = set(all_ids[:350])
-        test_ids = set(all_ids[350:400])
-        val_ids = set(all_ids[400:])  # 可以根据需要调整验证集的分配
+        id_num = len(all_ids)
+        train_size = int(len(all_ids)*(1-test_size))
+        train_ids = set(all_ids[:train_size])
+        test_ids = set(all_ids[train_size:id_num])
+        val_ids = set(all_ids[id_num:])  # 可以根据需要调整验证集的分配
         for anno in annos:
             if anno['id'] in train_ids:
                 train_annos.append(anno)
@@ -50,10 +51,10 @@ class ORBENCH(BaseDataset):
                 test_annos.append(anno)
             elif anno['id'] in val_ids:
                 val_annos.append(anno)
-        return train_annos, test_annos, val_annos
+        return train_annos, test_annos, val_annos, id_num
 
   
-    def _process_anno(self, annos: List[dict], training=False):
+    def _process_anno(self, annos: List[dict], training=False, first_pid = 0):
         pid_container = set()
         if training:
             dataset = []
@@ -86,12 +87,6 @@ class ORBENCH(BaseDataset):
                 dataset.append((pid, image_id, vis_img_path, cp_path, sk_path, nir_path, caption))
                 image_id += 1
             
-            # 检查 pid 是否是从 0 到 349 连续的
-            assert len(pid_container) == 350, f"Expected 350 unique pids, but got {len(pid_container)}"
-            for idx, pid in enumerate(sorted(pid_container)):
-                # 确保 pid 是连续的
-                assert idx == pid, f"Expected pid {idx}, but got {pid}"
-            
             return dataset, pid_container
 
 
@@ -112,8 +107,7 @@ class ORBENCH(BaseDataset):
             caption_pids = []
             val_pids = sorted(list(set([int(anno['id']) for anno in annos])))
 
-            assert len(val_pids) == 50 or len(val_pids) == 0, "Validation set must contain exactly 50 unique pids."
-            pid_mapping = {pid: 350 + idx for idx, pid in enumerate(val_pids)}
+            pid_mapping = {pid: first_pid + idx for idx, pid in enumerate(val_pids)}
             for anno in annos:
                 pid = int(anno['id'])
                 if pid in pid_mapping:  # 只处理验证集的 pid

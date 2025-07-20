@@ -65,10 +65,11 @@ def get_args():
     parser.add_argument("--sampler", default="random", help="choose sampler from [idtentity, random]")
     parser.add_argument("--num_instance", type=int, default=4)
     parser.add_argument("--root_dir", default="data_files")
-    parser.add_argument("--batch_size", type=int, default=32) # 记得改回来 batch_size原来是64
+    parser.add_argument("--batch_size", type=int, default=32) # batch_size原来是64
     parser.add_argument("--test_batch_size", type=int, default=512)
     parser.add_argument("--num_workers", type=int, default=8)
     parser.add_argument("--test", dest='training', default=True, action='store_false') # 意思是如果有--test args.trainging就会被设置为true
+    parser.add_argument("--test_size",type=float,default=150/400)  # 测试集占总样本的比例
 
     args = parser.parse_args()
 

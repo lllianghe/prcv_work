@@ -73,7 +73,7 @@ def build_dataloader(args, tranforms=None):
     logger = logging.getLogger("IRRA.dataset")
 
     num_workers = args.num_workers
-    dataset = __factory[args.dataset_name](root=args.root_dir)
+    dataset = __factory[args.dataset_name](root=args.root_dir,test_size = args.test_size)
     num_classes = len(dataset.train_id_container) # 训练时用的pid数量
     
     if args.training:

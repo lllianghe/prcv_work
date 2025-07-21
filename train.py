@@ -1,5 +1,4 @@
 import os
-os.environ['CUDA_VISIBLE_DEVICES'] = '2'
 import os.path as op
 import torch
 import numpy as np
@@ -51,7 +50,7 @@ if __name__ == '__main__':
     save_train_configs(args.output_dir, args)
 
     # get image-text pair datasets dataloader
-    train_loader, val_img_loader, val_txt_loader, num_classes = build_dataloader(args)
+    train_loader, test_loader, val_img_loader, val_txt_loader, num_classes = build_dataloader(args)
     model = build_model(args, num_classes) # num_classes是训练集中行人的身份数量
     logger.info('Total params: %2.fM' % (sum(p.numel() for p in model.parameters()) / 1000000.0))
     model.to(device)
@@ -78,4 +77,4 @@ if __name__ == '__main__':
         checkpoint = checkpointer.resume(args.resume_ckpt_file)
         start_epoch = checkpoint['epoch']
     
-    do_train(start_epoch, args, model, train_loader, evaluator, optimizer, scheduler, checkpointer)
+    do_train(start_epoch, args, model, train_loader, test_loader, evaluator, optimizer, scheduler, checkpointer)

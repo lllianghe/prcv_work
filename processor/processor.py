@@ -8,7 +8,7 @@ from torch.utils.tensorboard import SummaryWriter
 from prettytable import PrettyTable
 
 
-def do_train(start_epoch, args, model, train_loader, evaluator, optimizer,
+def do_train(start_epoch, args, model, train_loader, test_loader, evaluator, optimizer,
              scheduler, checkpointer):
 
     log_period = args.log_period
@@ -25,6 +25,7 @@ def do_train(start_epoch, args, model, train_loader, evaluator, optimizer,
     # meters是计量器可自动更新 平均值
     meters = {
         "loss": AverageMeter(),
+        "test_loss": AverageMeter(), # add for val loss
         "sdm_loss": AverageMeter(),
         "itc_loss": AverageMeter(),
         "id_loss": AverageMeter(),
@@ -51,7 +52,7 @@ def do_train(start_epoch, args, model, train_loader, evaluator, optimizer,
             # 打印当前显存使用情况
             allocated_memory = torch.cuda.memory_allocated(device) / (1024 ** 3)  # 转换为 GB
             cached_memory = torch.cuda.memory_reserved(device) / (1024 ** 3)  # 转换为 GB
-            logger.info(f"Iteration {n_iter + 1}/{len(train_loader)} - Allocated memory: {allocated_memory:.2f} GB, Cached memory: {cached_memory:.2f} GB")
+            # logger.info(f"Iteration {n_iter + 1}/{len(train_loader)} - Allocated memory: {allocated_memory:.2f} GB, Cached memory: {cached_memory:.2f} GB")
             ret = model(batch)
             total_loss = sum([v for k, v in ret.items() if "loss" in k]) # 计算损失函数 损失在模型中计算好了
             if args.dataset_name == 'ORBench':
@@ -71,6 +72,21 @@ def do_train(start_epoch, args, model, train_loader, evaluator, optimizer,
             total_loss.backward()
             optimizer.step()
             synchronize() # 分布式计算相关
+
+            # 计算测试集损失
+            if (n_iter + 1) % log_period == 0:
+                model.eval()
+                with torch.no_grad():
+                    test_loader_iter = iter(test_loader)
+                    for batch_test in test_loader_iter:
+                        batch_test = {k: v.to(device) for k, v in batch_test.items()}
+                        ret_test = model(batch_test)
+                        total_loss_test = sum([v for k, v in ret_test.items() if "loss" in k])
+                        batch_size_test = batch_test['vis_images'].shape[0]
+                        print("ok")
+                        meters['test_loss'].update(total_loss_test.item(), batch_size_test)
+                        break # 只要一个batch
+                model.train()
 
             if (n_iter + 1) % log_period == 0:
                 info_str = f"Epoch[{epoch}] Iteration[{n_iter + 1}/{len(train_loader)}]"
@@ -102,7 +118,11 @@ def do_train(start_epoch, args, model, train_loader, evaluator, optimizer,
                 if args.distributed:
                     top1 = evaluator.eval(model.module.eval())
                 else:
-                    top1 = evaluator.eval(model.eval())
+                    top1 = evaluator.eval(model.eval(), modalities="fourmodal_SK_NIR_CP_TEXT")
+                    top1 = evaluator.eval(model.eval(), modalities="onemodal_SK")
+                    top1 = evaluator.eval(model.eval(), modalities="onemodal_NIR")
+                    top1 = evaluator.eval(model.eval(), modalities="onemodal_CP")
+                    top1 = evaluator.eval(model.eval(), modalities="onemodal_TEXT")
 
                 torch.cuda.empty_cache()
                 if best_top1 < top1:

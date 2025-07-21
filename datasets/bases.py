@@ -21,8 +21,7 @@ class BaseDataset(object):
         num_train_pids, num_train_imgs, num_train_captions = len(
             self.train_id_container), len(self.train_annos), len(self.train)
         num_test_pids, num_test_imgs, num_test_captions = len(
-            self.test_id_container), len(self.test_annos), len(
-                self.test['captions'])
+            self.test_id_container), len(self.test_annos), len(self.test)
         num_val_pids, num_val_imgs, num_val_captions = len(
             self.val_id_container), len(self.val_annos), len(
                 self.val['captions'])

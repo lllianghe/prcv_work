@@ -18,7 +18,7 @@ from utils.iotools import load_train_configs
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description="irra Test")
-    parser.add_argument("--config_file", default='logs/ORBench/20250713_134839_irra/configs.yaml')
+    parser.add_argument("--config_file", default='/SSD_Data01/myf/research/PRCV/fgclip_model/prcv_work_branch/logs/ORBench/20250721_133606_irra/configs.yaml')
     # parser.add_argument("--config_file", default='logs/ORBench/20250715_021439_irra/configs.yaml') #这是fgclip的模型
     args = parser.parse_args()
     args = load_train_configs(args.config_file)
@@ -34,6 +34,7 @@ if __name__ == '__main__':
     checkpointer.load(f=op.join(args.output_dir, 'best.pth'))
     model.to(device)
     modalities = "onemodal_SK"
+    do_inference(model, test_img_loader, test_txt_loader,"fourmodal_SK_NIR_CP_TEXT")
     do_inference(model, test_img_loader, test_txt_loader,"onemodal_SK")
     do_inference(model, test_img_loader, test_txt_loader,"onemodal_NIR")
     do_inference(model, test_img_loader, test_txt_loader,"onemodal_CP")

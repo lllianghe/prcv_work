@@ -82,6 +82,8 @@ def build_dataloader(args, tranforms=None):
                                             is_train=True)
         val_transforms = build_transforms(img_size=args.img_size,
                                           is_train=False)
+
+        # 训练集
         if args.dataset_name== 'ORBench':
             train_set = ORBenchTrainDataset(dataset.train,
                             train_transforms,
@@ -131,8 +133,8 @@ def build_dataloader(args, tranforms=None):
         else:
             logger.error('unsupported sampler! expected softmax or triplet but got {}'.format(args.sampler))
 
-        # use test set as validate set 将测试集当验证集 这部分是要改的
-        ds = dataset.val if args.val_dataset == 'val' else dataset.test
+        # 验证集
+        ds = dataset.val # 测试集(算loss)和验证机(算mAP)已分开
         if args.dataset_name == 'ORBench':
             val_img_set = ORBenchGalleryDataset(ds['image_pids'],ds['vis_img_paths'],val_transforms)
             val_txt_set = ORBenchQueryDataset(ds['caption_pids'],
@@ -157,7 +159,33 @@ def build_dataloader(args, tranforms=None):
                                     batch_size=args.batch_size,
                                     shuffle=False,
                                     num_workers=num_workers)
-        return train_loader, val_img_loader, val_txt_loader, num_classes
+
+        # 测试集
+        if args.dataset_name == 'ORBench':
+            # 为ORBench创建验证加载器，使用与训练集相同的结构
+            test_set = ORBenchTrainDataset(dataset.test, val_transforms, text_length=args.text_length)
+            test_loader = DataLoader(
+                test_set,
+                batch_size=args.batch_size,
+                shuffle=True,
+                num_workers=num_workers,
+                collate_fn=collate
+            )
+        else:
+            if args.MLM:
+                test_set = ImageTextMLMDataset(ds, val_transforms, text_length=args.text_length)
+            else:
+                test_set = ImageTextDataset(ds, val_transforms, text_length=args.text_length)
+            
+            test_loader = DataLoader(
+                test_set,
+                batch_size=args.batch_size,
+                shuffle=False,
+                num_workers=num_workers,
+                collate_fn=collate
+            )
+
+        return train_loader, test_loader, val_img_loader, val_txt_loader, num_classes
 
     else:
         # build dataloader for testing 
@@ -167,7 +195,7 @@ def build_dataloader(args, tranforms=None):
             test_transforms = build_transforms(img_size=args.img_size,
                                                is_train=False)
 
-        ds = dataset.test #还是用的是测试集
+        ds = dataset.val #还是用的是测试集
         if args.dataset_name == 'ORBench':
             test_img_set = ORBenchGalleryDataset(ds['image_pids'],ds['vis_img_paths'],test_transforms)
             test_txt_set = ORBenchQueryDataset(ds['caption_pids'],

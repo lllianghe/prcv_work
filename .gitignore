@@ -4,7 +4,11 @@ data_files/
 other_files/
 model_cache/
 model_structure/
-a.py
+# 以tmp.py结尾的代码可以临时跑测试的python代码
+*tmp.py
 data/ORBench_PRCV/
 my_note.txt
 *.csv
+.vscode
+# 临时脚本的文件夹
+myscript/

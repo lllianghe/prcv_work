@@ -15,10 +15,21 @@ from utils.metrics import Evaluator
 import argparse
 from utils.iotools import load_train_configs
 
+import random
+def set_seed(seed=0):
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
+    np.random.seed(seed)
+    random.seed(seed)
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = True
 
 if __name__ == '__main__':
+    set_seed(1)
+
     parser = argparse.ArgumentParser(description="irra Test")
-    parser.add_argument("--config_file", default='/SSD_Data01/myf/research/PRCV/fgclip_model/prcv_work_branch/logs/ORBench/20250721_133606_irra/configs.yaml')
+    parser.add_argument("--config_file", default='/SSD_Data01/myf/research/PRCV/fgclip_model/prcv_work_branch/logs/ORBench/20250721_171456_irra copy/configs.yaml')
     # parser.add_argument("--config_file", default='logs/ORBench/20250715_021439_irra/configs.yaml') #这是fgclip的模型
     args = parser.parse_args()
     args = load_train_configs(args.config_file)

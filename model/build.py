@@ -141,11 +141,40 @@ class IRRA(nn.Module):
         logit_scale = self.logit_scale
         ret.update({'temperature': 1 / logit_scale})
         # 输入模态的融合特征为t_feats, 真实照片的特征为i_feats
-        if 'itc' in self.current_task:
-            ret.update({'itc_loss':objectives.compute_itc(i_feats, t_feats, logit_scale)})
+
         
-        if 'sdm' in self.current_task:
-            ret.update({'sdm_loss':objectives.compute_sdm(i_feats, t_feats, batch['pids'], logit_scale)})
+        if 'multi_modal_contrastive' in self.current_task: # 新增：多模态对比损失
+            # 将所有查询模态的特征放入一个字典中，方便后续处理
+            query_feats = {
+                'text': (text_feat, self.args.text_loss_weight),
+                'cp': (cp_img_feat, self.args.cp_loss_weight),
+                'sk': (sk_img_feat, self.args.sk_loss_weight),
+                'nir': (nir_img_feat, self.args.nir_loss_weight),
+            }
+            
+            # 方案一: 使用itc
+            if 'itc' in self.current_task:
+                multi_modal_contrastive_itc_loss = 0
+                for modal_name, (t_feats,t_loss_weight) in query_feats.items(): # 遍历每个查询模态
+                    loss = objectives.compute_itc(i_feats, t_feats, logit_scale)
+                    ret.update({f'{modal_name}_itc_Loss': loss}) # 大写L避免算入总损失
+                    multi_modal_contrastive_itc_loss += loss * t_loss_weight
+                ret.update({'multi_modal_contrastive_itc_loss': multi_modal_contrastive_itc_loss / len(query_feats)})
+
+            # 方案二: 使用sdm
+            if 'sdm' in self.current_task:
+                multi_modal_contrastive_sdm_loss = 0
+                for modal_name, (t_feats, t_loss_weight) in query_feats.items(): # 遍历每个查询模态
+                    loss = objectives.compute_sdm(i_feats, t_feats, batch['pids'], logit_scale)
+                    ret.update({f'{modal_name}_sdm_Loss': loss}) # 大写L避免算入总损失
+                    multi_modal_contrastive_sdm_loss += loss * t_loss_weight
+                ret.update({'multi_modal_contrastive_sdm_loss': multi_modal_contrastive_sdm_loss / len(query_feats)})
+        else:
+            if 'itc' in self.current_task:
+                ret.update({'itc_loss':objectives.compute_itc(i_feats, t_feats, logit_scale)})
+            
+            if 'sdm' in self.current_task:
+                ret.update({'sdm_loss':objectives.compute_sdm(i_feats, t_feats, batch['pids'], logit_scale)})
 
         if 'cmpm' in self.current_task:
             ret.update({'cmpm_loss':objectives.compute_cmpm(i_feats, t_feats, batch['pids'])})

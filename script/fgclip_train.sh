@@ -22,17 +22,23 @@
 
 DATASET_NAME="ORBench"
 
-CUDA_VISIBLE_DEVICES=1 \
+CUDA_VISIBLE_DEVICES=6 \
 python train.py \
 --name irra \
 --img_aug \
 --batch_size 16 \
 --MLM \
 --dataset_name $DATASET_NAME \
---loss_names 'sdm+id' \
 --num_epoch 60 \
 --pretrain_choice '/SSD_Data01/zyl/prcv_work/model_cache/huggingface_model/model.safetensors' \
 --root_dir '/SSD_Data01/PRCV-ReID5o/data/' \
 --val_dataset 'val' \
+--eval_period 2 \
+--loss_name 'sdm+id' \
+--sk_loss_weight 1.0 \
+--nir_loss_weight 1.0 \
+--cp_loss_weight 1.0 \
+--text_loss_weight 1.0 \
 # --resume --resume_ckpt_file '' \
 # --test_size 0.0 \
+# --loss_name 'multi_modal_contrastive+itc+sdm' \

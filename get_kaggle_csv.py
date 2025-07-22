@@ -1,6 +1,5 @@
 from prettytable import PrettyTable
 import os
-os.environ['CUDA_VISIBLE_DEVICES'] = '2'
 import torch
 import numpy as np
 import time
@@ -164,7 +163,7 @@ if __name__ == '__main__':
     query_type_ranges = get_query_type_idx_range(json_file)
     test_transforms = build_transforms(img_size=args.img_size,is_train=False)
     test_gallery_dataset = GalleryDataset('data_files/ORBench_PRCV/val/gallery',transform=test_transforms)
-    test_gallery_loader = DataLoader(test_gallery_dataset, batch_size=256, shuffle=False)
+    test_gallery_loader = DataLoader(test_gallery_dataset, batch_size=args.test_batch_size, shuffle=False)
     
     model = build_model(args,num_classes=350) #num_class必须和之前构建的model中的num_class对应
     checkpointer = Checkpointer(model)
@@ -184,7 +183,7 @@ if __name__ == '__main__':
         
         for current_query_type, begin_idx, end_idx in query_type_ranges:
             test_query_dataset = KaggleInputDataset('data_files/ORBench_PRCV/val/val_queries.json', begin_idx, end_idx, test_transforms)
-            test_query_loader = DataLoader(test_query_dataset, batch_size=256, shuffle=False)
+            test_query_loader = DataLoader(test_query_dataset, batch_size=args.test_batch_size, shuffle=False)
             qfeats = embedding_qfeats(model, test_query_loader, current_query_type)
             qfeats = F.normalize(qfeats, p=2, dim=1)  # 归一化
             similarity = qfeats @ gfeats.t()  # q * g

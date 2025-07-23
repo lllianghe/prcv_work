@@ -6,6 +6,52 @@ from utils.metrics import Evaluator, Evaluator_OR
 from utils.comm import get_rank, synchronize
 from torch.utils.tensorboard import SummaryWriter
 from prettytable import PrettyTable
+import matplotlib.pyplot as plt
+import os
+
+def plot_and_save_curves(output_dir, num_iter_per_epoch, train_loss_list, test_loss_list, r1_list, mAP_list, eval_iters_list=None, eval_epoch_list=None,
+                         r1_list_0=None, mAP_list_0=None, r1_list_1=None, mAP_list_1=None, r1_list_2=None, mAP_list_2=None,
+                         r1_list_3=None, mAP_list_3=None, r1_list_4=None, mAP_list_4=None):
+    plt.figure(figsize=(20, 10))
+
+    plt.subplot(2, 2, 1)
+    plt.plot(eval_iters_list, train_loss_list, label='Train Loss')
+    plt.plot(eval_iters_list, test_loss_list, label='Test Loss')
+    plt.xlabel(f'Evaluation Iteration (100 iters) ({num_iter_per_epoch} iters per epoch)')
+    plt.ylabel('Loss')
+    plt.legend()
+    plt.title('Loss Curves')
+
+    plt.subplot(2, 2, 2)
+    if eval_epoch_list:
+        plt.plot(eval_epoch_list, r1_list, label='Avg R1', linewidth=2, linestyle='--')
+        if r1_list_0: plt.plot(eval_epoch_list, r1_list_0, label='R1 (4modal)')
+        if r1_list_1: plt.plot(eval_epoch_list, r1_list_1, label='R1 (SK)')
+        if r1_list_2: plt.plot(eval_epoch_list, r1_list_2, label='R1 (NIR)')
+        if r1_list_3: plt.plot(eval_epoch_list, r1_list_3, label='R1 (CP)')
+        if r1_list_4: plt.plot(eval_epoch_list, r1_list_4, label='R1 (TEXT)')
+    plt.xlabel('Epoch')
+    plt.ylabel('R1 Score')
+    plt.legend()
+    plt.title('R1 Curves')
+
+    plt.subplot(2, 2, 3)
+    if eval_epoch_list:
+        plt.plot(eval_epoch_list, mAP_list, label='Avg mAP', linewidth=2, linestyle='--')
+        if mAP_list_0: plt.plot(eval_epoch_list, mAP_list_0, label='mAP (4modal)')
+        if mAP_list_1: plt.plot(eval_epoch_list, mAP_list_1, label='mAP (SK)')
+        if mAP_list_2: plt.plot(eval_epoch_list, mAP_list_2, label='mAP (NIR)')
+        if mAP_list_3: plt.plot(eval_epoch_list, mAP_list_3, label='mAP (CP)')
+        if mAP_list_4: plt.plot(eval_epoch_list, mAP_list_4, label='mAP (TEXT)')
+    plt.xlabel('Epoch')
+    plt.ylabel('mAP Score')
+    plt.legend()
+    plt.title('mAP Curves')
+
+    plt.tight_layout()
+    save_path = os.path.join(output_dir, 'curves.png')
+    plt.savefig(save_path)
+    plt.close()
 
 
 def do_train(start_epoch, args, model, train_loader, test_loader, evaluator, optimizer,
@@ -15,6 +61,7 @@ def do_train(start_epoch, args, model, train_loader, test_loader, evaluator, opt
     eval_period = args.eval_period
     device = "cuda"
     num_epoch = args.num_epoch
+    num_iter_per_epoch = len(train_loader)
     arguments = {}
     arguments["num_epoch"] = num_epoch
     arguments["iteration"] = 0
@@ -47,7 +94,25 @@ def do_train(start_epoch, args, model, train_loader, test_loader, evaluator, opt
 
     tb_writer = SummaryWriter(log_dir=args.output_dir)
 
-    best_top1 = 0.0
+    best_r1 = 0.0
+    best_loss = float('inf')
+    best_mAP = 0.0
+
+    # Lists to store metrics for plotting
+    eval_iters_list = [] # for plotting loss curves
+    eval_count = 0
+    train_loss_list = []
+    test_loss_list = []
+
+    r1_list = []
+    mAP_list = []
+    eval_epoch_list = [] # for plotting r1 and mAP curves
+
+    r1_list_0, mAP_list_0 = [], []
+    r1_list_1, mAP_list_1 = [], []
+    r1_list_2, mAP_list_2 = [], []
+    r1_list_3, mAP_list_3 = [], []
+    r1_list_4, mAP_list_4 = [], []
 
     # train
     for epoch in range(start_epoch, num_epoch + 1):
@@ -103,10 +168,22 @@ def do_train(start_epoch, args, model, train_loader, test_loader, evaluator, opt
                         ret_test = model(batch_test)
                         total_loss_test = sum([v for k, v in ret_test.items() if "loss" in k])
                         batch_size_test = batch_test['vis_images'].shape[0]
-                        print("ok")
                         meters['test_loss'].update(total_loss_test.item(), batch_size_test)
                         break # 只要一个batch
                 model.train()
+                
+                train_loss_list.append(meters['loss'].avg)
+                test_loss_list.append(meters['test_loss'].avg)
+                eval_iters_list.append(eval_count)
+                eval_count += 1
+                plot_and_save_curves(args.output_dir, num_iter_per_epoch, train_loss_list, test_loss_list, r1_list, mAP_list, eval_iters_list, eval_epoch_list=eval_epoch_list,
+                                     r1_list_0=r1_list_0, mAP_list_0=mAP_list_0, r1_list_1=r1_list_1, mAP_list_1=mAP_list_1, r1_list_2=r1_list_2, mAP_list_2=mAP_list_2, r1_list_3=r1_list_3, mAP_list_3=mAP_list_3, r1_list_4=r1_list_4, mAP_list_4=mAP_list_4)
+
+                if meters['test_loss'].avg < best_loss:
+                    best_loss = meters['test_loss'].avg
+                    arguments["best_loss_epoch"] = epoch
+                    checkpointer.save("best_loss", **arguments)
+
 
             if (n_iter + 1) % log_period == 0:
                 info_str = f"Epoch[{epoch}] Iteration[{n_iter + 1}/{len(train_loader)}]"
@@ -116,6 +193,7 @@ def do_train(start_epoch, args, model, train_loader, test_loader, evaluator, opt
                         info_str += f", {k}: {v.avg:.4f}"
                 info_str += f", Base Lr: {scheduler.get_lr()[0]:.2e}"
                 logger.info(info_str)
+        
         
         tb_writer.add_scalar('lr', scheduler.get_lr()[0], epoch)
         tb_writer.add_scalar('temperature', ret['temperature'], epoch)
@@ -132,25 +210,51 @@ def do_train(start_epoch, args, model, train_loader, test_loader, evaluator, opt
                 "Epoch {} done. Time per batch: {:.3f}[s] Speed: {:.1f}[samples/s]"
                 .format(epoch, time_per_batch,
                         train_loader.batch_size / time_per_batch))
-        if epoch % eval_period == 0:
+        if epoch % eval_period == 0 and epoch >= args.val_start_epoch:
             if get_rank() == 0:
                 logger.info("Validation Results - Epoch: {}".format(epoch))
                 if args.distributed:
-                    top1 = evaluator.eval(model.module.eval())
+                    r1 = evaluator.eval(model.module.eval())
                 else:
-                    top1 = evaluator.eval(model.eval(), modalities="fourmodal_SK_NIR_CP_TEXT")
-                    top1 = evaluator.eval(model.eval(), modalities="onemodal_SK")
-                    top1 = evaluator.eval(model.eval(), modalities="onemodal_NIR")
-                    top1 = evaluator.eval(model.eval(), modalities="onemodal_CP")
-                    top1 = evaluator.eval(model.eval(), modalities="onemodal_TEXT")
+                    r10,mAP0 = evaluator.eval(model.eval(), modalities="fourmodal_SK_NIR_CP_TEXT")
+                    r11,mAP1 = evaluator.eval(model.eval(), modalities="onemodal_SK")
+                    r12,mAP2 = evaluator.eval(model.eval(), modalities="onemodal_NIR")
+                    r13,mAP3 = evaluator.eval(model.eval(), modalities="onemodal_CP")
+                    r14,mAP4 =  evaluator.eval(model.eval(), modalities="onemodal_TEXT")
+                    r1 = (r10+r11+r12+r13+r14)/5
+                    mAP = (mAP0+mAP1+mAP2+mAP3+mAP4)/5
+
+                eval_epoch_list.append(epoch)
+                r1_list.append(r1)
+                mAP_list.append(mAP)
+
+                r1_list_0.append(r10)
+                mAP_list_0.append(mAP0)
+                r1_list_1.append(r11)
+                mAP_list_1.append(mAP1)
+                r1_list_2.append(r12)
+                mAP_list_2.append(mAP2)
+                r1_list_3.append(r13)
+                mAP_list_3.append(mAP3)
+                r1_list_4.append(r14)
+                mAP_list_4.append(mAP4)
+
+                plot_and_save_curves(args.output_dir, num_iter_per_epoch, train_loss_list, test_loss_list, r1_list, mAP_list, eval_iters_list, eval_epoch_list=eval_epoch_list,
+                                     r1_list_0=r1_list_0, mAP_list_0=mAP_list_0, r1_list_1=r1_list_1, mAP_list_1=mAP_list_1, r1_list_2=r1_list_2, mAP_list_2=mAP_list_2, r1_list_3=r1_list_3, mAP_list_3=mAP_list_3, r1_list_4=r1_list_4, mAP_list_4=mAP_list_4)
 
                 torch.cuda.empty_cache()
-                if best_top1 < top1:
-                    best_top1 = top1
-                    arguments["epoch"] = epoch
-                    checkpointer.save("best", **arguments)
-    if get_rank() == 0:
-        logger.info(f"best R1: {best_top1} at epoch {arguments['epoch']}")
+                if best_r1 < r1:
+                    best_r1 = r1
+                    arguments["best_r1_epoch"] = epoch
+                    checkpointer.save("best_r1", **arguments)
+                if best_mAP < mAP:
+                    best_mAP = mAP
+                    arguments["best_mAP_epoch"] = epoch
+                    checkpointer.save("best_mAP", **arguments)
+                    
+                logger.info(f"best loss: {best_loss} at epoch {arguments['best_loss_epoch']}")
+                logger.info(f"best R1: {best_r1} at epoch {arguments['best_r1_epoch']}")
+                logger.info(f"best mAP: {best_mAP} at epoch {arguments['best_mAP_epoch']}")
 
 
 def do_inference(model, test_img_loader, test_txt_loader,modalities):
@@ -159,4 +263,4 @@ def do_inference(model, test_img_loader, test_txt_loader,modalities):
     logger.info("Enter inferencing")
     # evaluator = Evaluator(test_img_loader, test_txt_loader)
     evaluator = Evaluator_OR(test_img_loader, test_txt_loader)
-    top1 = evaluator.eval(model.eval(),modalities=modalities)
+    r1,map = evaluator.eval(model.eval(),modalities=modalities)

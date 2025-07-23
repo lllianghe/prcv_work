@@ -183,4 +183,4 @@ class Evaluator_OR():
         table.custom_format["mINP"] = lambda f, v: f"{v:.3f}"
         self.logger.info('\n' + str(table))
         
-        return t2i_cmc[0]
+        return t2i_cmc[0], t2i_mAP

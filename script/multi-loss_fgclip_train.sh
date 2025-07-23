@@ -9,30 +9,22 @@
 正则化
 
 
-
-
---loss_name 'multi_modal_contrastive+sdm' \
---sk_loss_weight 1.0 \
---nir_loss_weight 4.0 \
---cp_loss_weight 0.8 \
---text_loss_weight 2.0 \
---lr \
---weight declay \
-
-
 """
 
 
 DATASET_NAME="ORBench"
 
 # --resume --resume_ckpt_file '' \
+# --optimizer Adamw \
+# --args.momentum \
 # --weight_decay 1e-3 \
-#  --lr 1e-4 \
 
 
-CUDA_VISIBLE_DEVICES=7 \
+CUDA_VISIBLE_DEVICES=6 \
 python train.py \
 --loss_name 'multi_modal_contrastive+itc' \
+--lr 5e-6 \
+--optimizer Adam \
 --test_size 0.375 \
 --eval_period 1 \
 --val_start_epoch 2 \

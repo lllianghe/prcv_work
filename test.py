@@ -14,9 +14,21 @@ from model import build_model
 from utils.metrics import Evaluator
 import argparse
 from utils.iotools import load_train_configs
+import random
+
+def set_seed(seed=0):
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
+    np.random.seed(seed)
+    random.seed(seed)
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = True
+
 
 
 if __name__ == '__main__':
+    set_seed(42)
     parser = argparse.ArgumentParser(description="irra Test")
     parser.add_argument("--config_file", default='logs/ORBench/20250713_134839_irra/configs.yaml')
     # parser.add_argument("--config_file", default='logs/ORBench/20250715_021439_irra/configs.yaml') #这是fgclip的模型
@@ -27,7 +39,6 @@ if __name__ == '__main__':
     logger = setup_logger('IRRA', save_dir=args.output_dir, if_train=args.training)
     logger.info(args)
     device = "cuda"
-
     test_img_loader, test_txt_loader, num_classes = build_dataloader(args)
     model = build_model(args, num_classes=num_classes)
     checkpointer = Checkpointer(model)

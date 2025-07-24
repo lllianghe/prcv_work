@@ -15,8 +15,8 @@ from model import build_model
 from utils.metrics import Evaluator
 import argparse
 from utils.iotools import load_train_configs
-
 import random
+
 def set_seed(seed=0):
     torch.manual_seed(seed)
     torch.cuda.manual_seed(seed)
@@ -26,9 +26,10 @@ def set_seed(seed=0):
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = True
 
-if __name__ == '__main__':
-    set_seed(1)
 
+
+if __name__ == '__main__':
+    set_seed(42)
     parser = argparse.ArgumentParser(description="irra Test")
     parser.add_argument("--config_file", default=
                                                ''

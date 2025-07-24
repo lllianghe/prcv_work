@@ -25,7 +25,7 @@ DATASET_NAME="ORBench"
 # --resume --resume_ckpt_file '' \
 # --test_size 0.0 \
 # --loss_name 'multi_modal_contrastive+itc+sdm' \
-CUDA_VISIBLE_DEVICES=2 \
+CUDA_VISIBLE_DEVICES=1 \
 python train.py \
 --loss_name 'sdm+id' \
 --test_size 0.125 \

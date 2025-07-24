@@ -58,11 +58,13 @@ def get_args():
     parser.add_argument("--milestones", type=int, nargs='+', default=(20, 50))
     parser.add_argument("--gamma", type=float, default=0.1)
     parser.add_argument("--warmup_factor", type=float, default=0.1)
-    parser.add_argument("--warmup_epochs", type=int, default=5)
     parser.add_argument("--warmup_method", type=str, default="linear")
     parser.add_argument("--lrscheduler", type=str, default="cosine")
     parser.add_argument("--target_lr", type=float, default=0)
     parser.add_argument("--power", type=float, default=0.9)
+    parser.add_argument("--schedule_steps", type=int, default=50)
+    parser.add_argument("--warmup_steps", type=int, default=800)
+    parser.add_argument("--annealing_steps", type=int, default=4000)
 
     ######################## dataset ########################
     parser.add_argument("--dataset_name", default='ORBench', help="[CUHK-PEDES, ICFG-PEDES, RSTPReid, ORBench]")

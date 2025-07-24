@@ -157,7 +157,7 @@ class Evaluator_OR():
 
         return qfeats, gfeats, qids, gids
     
-    def eval(self, model, i2t_metric=False,modalities="fourmodal_SK_TEXT_CP_NIR"):
+    def eval(self, model, i2t_metric=False,modalities="fourmodal_SK_TEXT_CP_NIR"): # 新功能, 分别计算相似度加权
 
         qfeats, gfeats, qids, gids = self._compute_embedding(model, modalities)
 

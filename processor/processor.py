@@ -9,7 +9,7 @@ from prettytable import PrettyTable
 import matplotlib.pyplot as plt
 import os
 
-def plot_and_save_curves(output_dir, num_iter_per_epoch, train_loss_list, test_loss_list, r1_list, mAP_list, eval_iters_list=None, eval_epoch_list=None,
+def plot_and_save_curves(output_dir, num_iter_per_epoch, train_loss_list, test_loss_list, r1_list, mAP_list, lr_list, eval_iters_list=None, eval_epoch_list=None,
                          r1_list_0=None, mAP_list_0=None, r1_list_1=None, mAP_list_1=None, r1_list_2=None, mAP_list_2=None,
                          r1_list_3=None, mAP_list_3=None, r1_list_4=None, mAP_list_4=None):
     plt.figure(figsize=(20, 10))
@@ -48,6 +48,13 @@ def plot_and_save_curves(output_dir, num_iter_per_epoch, train_loss_list, test_l
     plt.ylabel('mAP Score')
     plt.legend()
     plt.title('mAP Curves')
+
+    plt.subplot(2, 2, 4)
+    plt.plot(eval_iters_list, lr_list, label='Learning Rate')
+    plt.xlabel(f'*100 Eval-Steps ({num_iter_per_epoch} steps per epoch)')
+    plt.ylabel('Learning Rate')
+    plt.legend()
+    plt.title('Learning Rate Curve')
 
     plt.tight_layout()
     save_path = os.path.join(output_dir, 'curves.png')
@@ -104,6 +111,7 @@ def do_train(start_epoch, args, model, train_loader, test_loader, evaluator, opt
     eval_count = 0
     train_loss_list = []
     test_loss_list = []
+    lr_list = []
 
     r1_list = []
     mAP_list = []
@@ -157,6 +165,7 @@ def do_train(start_epoch, args, model, train_loader, test_loader, evaluator, opt
             optimizer.zero_grad()
             total_loss.backward()
             optimizer.step()
+    
             synchronize() # 分布式计算相关
 
             # 计算测试集损失
@@ -175,9 +184,10 @@ def do_train(start_epoch, args, model, train_loader, test_loader, evaluator, opt
                 
                 train_loss_list.append(meters['loss'].avg)
                 test_loss_list.append(meters['test_loss'].avg)
+                lr_list.append(scheduler.get_lr()[0])
                 eval_count += 1
                 eval_iters_list.append(eval_count)
-                plot_and_save_curves(args.output_dir, num_iter_per_epoch, train_loss_list, test_loss_list, r1_list, mAP_list, eval_iters_list, eval_epoch_list=eval_epoch_list,
+                plot_and_save_curves(args.output_dir, num_iter_per_epoch, train_loss_list, test_loss_list, r1_list, mAP_list, lr_list, eval_iters_list, eval_epoch_list=eval_epoch_list,
                                      r1_list_0=r1_list_0, mAP_list_0=mAP_list_0, r1_list_1=r1_list_1, mAP_list_1=mAP_list_1, r1_list_2=r1_list_2, mAP_list_2=mAP_list_2, r1_list_3=r1_list_3, mAP_list_3=mAP_list_3, r1_list_4=r1_list_4, mAP_list_4=mAP_list_4)
 
                 if meters['test_loss'].avg < best_loss:
@@ -194,6 +204,10 @@ def do_train(start_epoch, args, model, train_loader, test_loader, evaluator, opt
                         info_str += f", {k}: {v.avg:.4f}"
                 info_str += f", Base Lr: {scheduler.get_lr()[0]:.2e}"
                 logger.info(info_str)
+
+            if (n_iter + 1) % args.schedule_steps == 0:
+                scheduler.step(args.schedule_steps)
+
         
         
         tb_writer.add_scalar('lr', scheduler.get_lr()[0], epoch)
@@ -203,7 +217,7 @@ def do_train(start_epoch, args, model, train_loader, test_loader, evaluator, opt
                 tb_writer.add_scalar(k, v.avg, epoch)
 
 
-        scheduler.step()
+        # scheduler.step()
         if get_rank() == 0:
             end_time = time.time()
             time_per_batch = (end_time - start_time) / (n_iter + 1)
@@ -222,8 +236,8 @@ def do_train(start_epoch, args, model, train_loader, test_loader, evaluator, opt
                     r12,mAP2 = evaluator.eval(model.eval(), modalities="onemodal_NIR")
                     r13,mAP3 = evaluator.eval(model.eval(), modalities="onemodal_CP")
                     r14,mAP4 =  evaluator.eval(model.eval(), modalities="onemodal_TEXT")
-                    r1 = (r10+r11+r12+r13+r14)/5
-                    mAP = (mAP0+mAP1+mAP2+mAP3+mAP4)/5
+                    r1 = (r11+r12+r13+r14)/4
+                    mAP = (mAP1+mAP2+mAP3+mAP4)/4
                     print(f'R1: {r1:.4f}\nmAP: {mAP:.4f}')
 
 
@@ -242,12 +256,12 @@ def do_train(start_epoch, args, model, train_loader, test_loader, evaluator, opt
                 r1_list_4.append(r14)
                 mAP_list_4.append(mAP4)
 
-                plot_and_save_curves(args.output_dir, num_iter_per_epoch, train_loss_list, test_loss_list, r1_list, mAP_list, eval_iters_list, eval_epoch_list=eval_epoch_list,
+                plot_and_save_curves(args.output_dir, num_iter_per_epoch, train_loss_list, test_loss_list, r1_list, mAP_list, lr_list, eval_iters_list, eval_epoch_list=eval_epoch_list,
                                      r1_list_0=r1_list_0, mAP_list_0=mAP_list_0, r1_list_1=r1_list_1, mAP_list_1=mAP_list_1, r1_list_2=r1_list_2, mAP_list_2=mAP_list_2, r1_list_3=r1_list_3, mAP_list_3=mAP_list_3, r1_list_4=r1_list_4, mAP_list_4=mAP_list_4)
 
                 torch.cuda.empty_cache()
-                if best_r1 < r1:
-                    best_r1 = r1
+                if best_r1 < r10:
+                    best_r1 = r10
                     arguments["best_r1_epoch"] = epoch
                     checkpointer.save("best_r1", **arguments)
                 if best_mAP < mAP:

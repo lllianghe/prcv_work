@@ -43,15 +43,15 @@ if __name__ == '__main__':
     
     device = "cuda"
     cur_time = time.strftime("%Y%m%d_%H%M%S", time.localtime())
-    # args.output_dir = op.join(args.output_dir, args.dataset_name, f'{cur_time}_{name}')
-    args.output_dir = op.join(args.output_dir, args.dataset_name, f'test_fgclip')
+    args.output_dir = op.join(args.output_dir, args.dataset_name, f'{cur_time}_{name}')
+    # args.output_dir = op.join(args.output_dir, args.dataset_name, f'test_fgclip')
     logger = setup_logger('IRRA', save_dir=args.output_dir, if_train=args.training, distributed_rank=get_rank())
     logger.info("Using {} GPUs".format(num_gpus))
     logger.info(str(args).replace(',', '\n'))
     save_train_configs(args.output_dir, args)
 
     # get image-text pair datasets dataloader
-    train_loader, val_img_loader, val_txt_loader, num_classes = build_dataloader(args)
+    train_loader, test_loader, val_img_loader, val_txt_loader, num_classes = build_dataloader(args)
     model = build_model(args, num_classes) # num_classes是训练集中行人的身份数量
     logger.info('Total params: %2.fM' % (sum(p.numel() for p in model.parameters()) / 1000000.0))
     model.to(device)
@@ -78,4 +78,4 @@ if __name__ == '__main__':
         checkpoint = checkpointer.resume(args.resume_ckpt_file)
         start_epoch = checkpoint['epoch']
     
-    do_train(start_epoch, args, model, train_loader, evaluator, optimizer, scheduler, checkpointer)
+    do_train(start_epoch, args, model, train_loader, test_loader, evaluator, optimizer, scheduler, checkpointer)

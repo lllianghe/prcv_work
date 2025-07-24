@@ -8,7 +8,8 @@ def get_args():
     parser.add_argument("--name", default="irra", help="experiment name to save")
     parser.add_argument("--output_dir", default="logs")
     parser.add_argument("--log_period", default=100)
-    parser.add_argument("--eval_period", default=1)
+    parser.add_argument("--eval_period", default=1, type=int)
+    parser.add_argument("--val_start_epoch", default=1, type=int, help='which epoch to start val') # 从哪个epoch开始验证
     parser.add_argument("--val_dataset", default="test") # use val set when evaluate, if test use test set
     parser.add_argument("--resume", default=False, action='store_true')
     parser.add_argument("--resume_ckpt_file", default="", help='resume from ...')
@@ -26,9 +27,13 @@ def get_args():
     parser.add_argument("--MLM", default=False, action='store_true', help="whether to use Mask Language Modeling dataset") #暂时删除mlm功能 下面的loss_names也删了mlm
 
     ######################## loss settings ########################
-    parser.add_argument("--loss_names", default='sdm+id', help="which loss to use ['mlm', 'cmpm', 'id', 'itc', 'sdm']")
+    parser.add_argument("--loss_names", default='sdm+id', help="which loss to use ['mlm', 'cmpm', 'id', 'itc', 'sdm', 'multi_modal_contrastive']")
     parser.add_argument("--mlm_loss_weight", type=float, default=1.0, help="mlm loss weight")
     parser.add_argument("--id_loss_weight", type=float, default=1.0, help="id loss weight")
+    parser.add_argument("--sk_loss_weight", type=float, default=1.0, help="Weight for sk contrastive loss")
+    parser.add_argument("--nir_loss_weight", type=float, default=1.0, help="Weight for nir contrastive loss")
+    parser.add_argument("--cp_loss_weight", type=float, default=1.0, help="Weight for cp contrastive loss")
+    parser.add_argument("--text_loss_weight", type=float, default=1.0, help="Weight for text contrastive loss")
     
     ######################## vison trainsformer settings ########################
     parser.add_argument("--img_size", type=tuple, default=(384, 128))
@@ -53,11 +58,13 @@ def get_args():
     parser.add_argument("--milestones", type=int, nargs='+', default=(20, 50))
     parser.add_argument("--gamma", type=float, default=0.1)
     parser.add_argument("--warmup_factor", type=float, default=0.1)
-    parser.add_argument("--warmup_epochs", type=int, default=5)
     parser.add_argument("--warmup_method", type=str, default="linear")
     parser.add_argument("--lrscheduler", type=str, default="cosine")
     parser.add_argument("--target_lr", type=float, default=0)
     parser.add_argument("--power", type=float, default=0.9)
+    parser.add_argument("--schedule_steps", type=int, default=50)
+    parser.add_argument("--warmup_steps", type=int, default=800)
+    parser.add_argument("--annealing_steps", type=int, default=4000)
 
     ######################## dataset ########################
     parser.add_argument("--dataset_name", default='ORBench', help="[CUHK-PEDES, ICFG-PEDES, RSTPReid, ORBench]")

@@ -8,35 +8,36 @@
 (过拟合)
 正则化
 
---sk_loss_weight 1.0 \
---nir_loss_weight 4.0 \
---cp_loss_weight 0.8 \
---text_loss_weight 2.0 \
 
---sk_loss_weight 0.5 \
---nir_loss_weight 4.0 \
---cp_loss_weight 0.25 \
---text_loss_weight 2.0 \
 """
 
 
 DATASET_NAME="ORBench"
 
 # --resume --resume_ckpt_file '' \
-# --test_size 0.0 \
-# --loss_name 'multi_modal_contrastive+itc+sdm' \
-CUDA_VISIBLE_DEVICES=1 \
+# --optimizer Adamw \
+# --args.momentum \
+# --weight_decay 1e-3 \
+
+
+CUDA_VISIBLE_DEVICES=7 \
 python train.py \
---loss_name 'sdm+id' \
+--loss_name 'multi_modal_contrastive+itc' \
+--lr 5e-6 \
+--lrscheduler 'cosine_warm' \
+--optimizer Adam \
+--schedule_steps 50 \
+--warmup_steps 400 \
+--annealing_steps 2000 \
 --test_size 0.125 \
 --eval_period 1 \
---val_start_epoch 5 \
+--val_start_epoch 2 \
+--batch_size 30 \
 --pretrain_choice '/SSD_Data01/zyl/prcv_work/model_cache/huggingface_model/model.safetensors' \
 --root_dir '/SSD_Data01/PRCV-ReID5o/data/' \
 --name irra \
 --img_aug \
---batch_size 30 \
 --MLM \
 --dataset_name $DATASET_NAME \
---num_epoch 60 \
 --val_dataset 'val' \
+--num_epoch 20 \

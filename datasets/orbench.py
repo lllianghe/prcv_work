@@ -24,8 +24,8 @@ class ORBENCH(BaseDataset):
         self.train_annos, self.test_annos, self.val_annos, id_num = self._split_anno(self.anno_path,test_size=test_size)
 
         self.train, self.train_id_container = self._process_anno(self.train_annos,True,first_pid=0)
-        self.test, self.test_id_container = self._process_anno(self.test_annos,False,first_pid = int(id_num*(1-test_size)))
-        self.val, self.val_id_container = self._process_anno(self.val_annos,False,first_pid=id_num)
+        self.test, self.test_id_container = self._process_anno(self.test_annos,True,first_pid = int(id_num*(1-test_size)))
+        self.val, self.val_id_container = self._process_anno(self.val_annos,False,first_pid = int(id_num*(1-test_size)))
 
         if verbose:
             self.logger.info("=> CUHK-PEDES Images and Captions are loaded")
@@ -43,13 +43,13 @@ class ORBENCH(BaseDataset):
         train_size = int(len(all_ids)*(1-test_size))
         train_ids = set(all_ids[:train_size])
         test_ids = set(all_ids[train_size:id_num])
-        val_ids = set(all_ids[id_num:])  # 可以根据需要调整验证集的分配
+        val_ids = set(all_ids[train_size:id_num])  # 可以根据需要调整验证集的分配
         for anno in annos:
             if anno['id'] in train_ids:
                 train_annos.append(anno)
-            elif anno['id'] in test_ids:
+            if anno['id'] in test_ids:
                 test_annos.append(anno)
-            elif anno['id'] in val_ids:
+            if anno['id'] in val_ids:
                 val_annos.append(anno)
         return train_annos, test_annos, val_annos, id_num
 

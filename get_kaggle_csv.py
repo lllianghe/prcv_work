@@ -1,5 +1,5 @@
-from prettytable import PrettyTable
 import os
+from prettytable import PrettyTable
 import torch
 import numpy as np
 import time
@@ -24,6 +24,7 @@ from utils.kaggle import get_query_type_idx_range
 from datasets.bases_or import tokenize
 import torch.nn.functional as F
 import csv
+os.environ['CUDA_VISIBLE_DEVICES'] = '3'
 
 class KaggleInputDataset(Dataset):
     def __init__(self, json_path,begin_idx,end_idx, transform):
@@ -150,7 +151,9 @@ def embedding_gfeats(test_gallery_loader, model):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description="irra Test")
     # 把对应model的file放这就行了
-    parser.add_argument("--config_file", default='logs/ORBench/20250713_134839_irra/configs.yaml') 
+    parser.add_argument("--config_file", default=
+                                       '/SSD_Data01/myf/research/PRCV/fgclip_model/prcv_work_branch/logs/ORBench/20250723_183222_irra/configs.yaml'
+                                                ) 
     # parser.add_argument("--config_file", default='logs/ORBench/20250715_021439_irra/configs.yaml') #这是fgclip的模型
     args = parser.parse_args()
     args = load_train_configs(args.config_file)
@@ -167,7 +170,7 @@ if __name__ == '__main__':
     
     model = build_model(args,num_classes=350) #num_class必须和之前构建的model中的num_class对应
     checkpointer = Checkpointer(model)
-    checkpointer.load(f=op.join(args.output_dir, 'best.pth'))
+    checkpointer.load(f=op.join(args.output_dir, 'best_mAP.pth'))
     model.to(device)
     
     gfeats = embedding_gfeats(test_gallery_loader,model)
@@ -175,7 +178,7 @@ if __name__ == '__main__':
     print(f"embedding_gfeats success")
     json_file = 'data_files/ORBench_PRCV/val/val_queries.json'
     query_type_ranges = get_query_type_idx_range(json_file)
-    output_file='ranking_list.csv'
+    output_file=op.join(args.output_dir, 'ranking_list.csv')
     with open(output_file, mode='w', newline='') as csvfile:
         fieldnames = ['query_idx', 'query_type', 'ranking_list_idx']
         writer = csv.DictWriter(csvfile, fieldnames=fieldnames)

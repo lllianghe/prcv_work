@@ -1,6 +1,4 @@
 from prettytable import PrettyTable
-import os
-# os.environ['CUDA_VISIBLE_DEVICES'] = '3'
 import torch
 import numpy as np
 import time
@@ -25,12 +23,16 @@ def set_seed(seed=0):
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = True
 
+import os
+os.environ['CUDA_VISIBLE_DEVICES'] = '5'
 
 
 if __name__ == '__main__':
     set_seed(42)
     parser = argparse.ArgumentParser(description="irra Test")
-    parser.add_argument("--config_file", default='logs/ORBench/20250713_134839_irra/configs.yaml')
+    parser.add_argument("--config_file", default=
+                                                                '/SSD_Data01/myf/research/PRCV/fgclip_model/prcv_work/logs/ORBench/test_fgclip/configs.yaml'
+                                                            )
     # parser.add_argument("--config_file", default='logs/ORBench/20250715_021439_irra/configs.yaml') #这是fgclip的模型
     args = parser.parse_args()
     args = load_train_configs(args.config_file)
@@ -45,7 +47,4 @@ if __name__ == '__main__':
     checkpointer.load(f=op.join(args.output_dir, 'best.pth'))
     model.to(device)
     modalities = "onemodal_SK"
-    do_inference(model, test_img_loader, test_txt_loader,"onemodal_SK")
-    do_inference(model, test_img_loader, test_txt_loader,"onemodal_NIR")
-    do_inference(model, test_img_loader, test_txt_loader,"onemodal_CP")
-    do_inference(model, test_img_loader, test_txt_loader,"onemodal_TEXT")
+    do_inference(model, test_img_loader, test_txt_loader)

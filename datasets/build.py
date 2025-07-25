@@ -157,6 +157,7 @@ def build_dataloader(args, tranforms=None):
                                     batch_size=args.batch_size,
                                     shuffle=False,
                                     num_workers=num_workers)
+        # print(len(train_loader), len(val_img_loader), len(val_txt_loader))
         return train_loader, val_img_loader, val_txt_loader, num_classes
 
     else:

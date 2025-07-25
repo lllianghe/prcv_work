@@ -297,7 +297,8 @@ class FGCLIPModel(CLIPModel):
 
         return feature_map
 
-    def forward( self, vis_images, cp_images, sk_images, nir_images, text):
+
+    # def forward( self, vis_images, cp_images, sk_images, nir_images, text):
         vis_img_feats = self.get_image_features(vis_images)
         cp_img_feats = self.get_image_features(cp_images)
         sk_img_feats = self.get_image_features(sk_images)
@@ -306,6 +307,14 @@ class FGCLIPModel(CLIPModel):
         return vis_img_feats, cp_img_feats, sk_img_feats, nir_img_feats, text_feats
 
 
+    def forward(self, vis_images=None, cp_images=None, sk_images=None, nir_images=None, text=None):
+        vis_img_feats = self.encode_image(vis_images) if vis_images is not None else None
+        cp_img_feats = self.encode_image(cp_images) if cp_images is not None else None
+        sk_img_feats = self.encode_image(sk_images) if sk_images is not None else None
+        nir_img_feats = self.encode_image(nir_images) if nir_images is not None else None
+        text_feats = self.encode_text(text) if text is not None else None
+        return vis_img_feats, cp_img_feats, sk_img_feats, nir_img_feats, text_feats
+    
     
 
     def clip_loss(self,image_features_long, text_features_long, text_features_short,rank,image):

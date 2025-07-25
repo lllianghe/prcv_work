@@ -25,6 +25,16 @@ def do_train(start_epoch, args, model, train_loader, evaluator, optimizer,
     # meters是计量器可自动更新 平均值
     meters = {
         "loss": AverageMeter(),
+        "multi_modal_contrastive_sdm_loss": AverageMeter(),
+        "sk_sdm_loss": AverageMeter(),
+        "nir_sdm_loss": AverageMeter(),
+        "cp_sdm_loss": AverageMeter(),
+        "text_sdm_loss": AverageMeter(),
+        "multi_modal_contrastive_itc_loss": AverageMeter(),
+        "sk_itc_loss": AverageMeter(),
+        "nir_itc_loss": AverageMeter(),
+        "cp_itc_loss": AverageMeter(),
+        "text_itc_loss": AverageMeter(),
         "sdm_loss": AverageMeter(),
         "itc_loss": AverageMeter(),
         "id_loss": AverageMeter(),
@@ -36,7 +46,8 @@ def do_train(start_epoch, args, model, train_loader, evaluator, optimizer,
 
     tb_writer = SummaryWriter(log_dir=args.output_dir)
 
-    best_top1 = 0.0
+    best_r1 = 0.0
+    best_mAP = 0.0
 
     # train
     for epoch in range(start_epoch, num_epoch + 1):
@@ -51,13 +62,28 @@ def do_train(start_epoch, args, model, train_loader, evaluator, optimizer,
             # 打印当前显存使用情况
             allocated_memory = torch.cuda.memory_allocated(device) / (1024 ** 3)  # 转换为 GB
             cached_memory = torch.cuda.memory_reserved(device) / (1024 ** 3)  # 转换为 GB
-            logger.info(f"Iteration {n_iter + 1}/{len(train_loader)} - Allocated memory: {allocated_memory:.2f} GB, Cached memory: {cached_memory:.2f} GB")
+            # logger.info(f"Iteration {n_iter + 1}/{len(train_loader)} - Allocated memory: {allocated_memory:.2f} GB, Cached memory: {cached_memory:.2f} GB")
+            
+            optimizer.zero_grad()
+
             ret = model(batch)
-            total_loss = sum([v for k, v in ret.items() if "loss" in k]) # 计算损失函数 损失在模型中计算好了
+
+            total_loss = sum([v for k, v in ret.items() if "loss" in k]) # 计算损失函数 multi_modal_contrastive_loss损失在模型中计算好了, 并且已经成功detach
+
             if args.dataset_name == 'ORBench':
                 batch_size = batch['vis_images'].shape[0]
             else: batch_size = batch['images'].shape[0]
             meters['loss'].update(total_loss.item(), batch_size)
+            meters['multi_modal_contrastive_sdm_loss'].update(ret.get('multi_modal_contrastive_sdm_loss', 0), batch_size)
+            meters['sk_sdm_loss'].update(ret.get('sk_sdm_Loss', 0), batch_size)
+            meters['nir_sdm_loss'].update(ret.get('nir_sdm_Loss', 0), batch_size)
+            meters['cp_sdm_loss'].update(ret.get('cp_sdm_Loss', 0), batch_size)
+            meters['text_sdm_loss'].update(ret.get('text_sdm_Loss', 0), batch_size)
+            meters['multi_modal_contrastive_itc_loss'].update(ret.get('multi_modal_contrastive_itc_loss', 0), batch_size)
+            meters['sk_itc_loss'].update(ret.get('sk_itc_Loss', 0), batch_size)
+            meters['nir_itc_loss'].update(ret.get('nir_itc_Loss', 0), batch_size)
+            meters['cp_itc_loss'].update(ret.get('cp_itc_Loss', 0), batch_size)
+            meters['text_itc_loss'].update(ret.get('text_itc_Loss', 0), batch_size)
             meters['sdm_loss'].update(ret.get('sdm_loss', 0), batch_size)
             meters['itc_loss'].update(ret.get('itc_loss', 0), batch_size)
             meters['id_loss'].update(ret.get('id_loss', 0), batch_size)
@@ -67,9 +93,10 @@ def do_train(start_epoch, args, model, train_loader, evaluator, optimizer,
             meters['txt_acc'].update(ret.get('txt_acc', 0), batch_size)
             meters['mlm_acc'].update(ret.get('mlm_acc', 0), 1)
 
-            optimizer.zero_grad()
-            total_loss.backward()
+            if total_loss.requires_grad:
+                total_loss.backward()
             optimizer.step()
+
             synchronize() # 分布式计算相关
 
             if (n_iter + 1) % log_period == 0:
@@ -99,24 +126,33 @@ def do_train(start_epoch, args, model, train_loader, evaluator, optimizer,
         if epoch % eval_period == 0:
             if get_rank() == 0:
                 logger.info("Validation Results - Epoch: {}".format(epoch))
-                if args.distributed:
-                    top1 = evaluator.eval(model.module.eval())
+                if isinstance(evaluator, Evaluator_OR):
+                    modalities = ["fourmodal_SK_TEXT_CP_NIR", "onemodal_TEXT", "onemodal_CP", "onemodal_SK", "onemodal_NIR"]
                 else:
-                    top1 = evaluator.eval(model.eval())
+                    modalities = None
+
+                if args.distributed:
+                    r1, mAP = evaluator.eval(model.module.eval(), modalities=modalities)
+                else:
+                    r1, mAP = evaluator.eval(model.eval(), modalities=modalities)
 
                 torch.cuda.empty_cache()
-                if best_top1 < top1:
-                    best_top1 = top1
-                    arguments["epoch"] = epoch
-                    checkpointer.save("best", **arguments)
-    if get_rank() == 0:
-        logger.info(f"best R1: {best_top1} at epoch {arguments['epoch']}")
+                if best_r1 < r1:
+                    best_r1 = r1
+                    arguments["best_r1_epoch"] = epoch
+                    checkpointer.save("best_r1", **arguments)
+                if best_mAP < mAP:
+                    best_mAP = mAP
+                    arguments["best_mAP_epoch"] = epoch
+                    checkpointer.save("best_mAP", **arguments)
+                logger.info(f"best R1: {best_r1} at epoch {arguments['best_r1_epoch']}")
+                logger.info(f"best mAP: {best_mAP} at epoch {arguments['best_mAP_epoch']}")
 
 
-def do_inference(model, test_img_loader, test_txt_loader,modalities):
+def do_inference(model, test_img_loader, test_txt_loader):
 
     logger = logging.getLogger(f"IRRA.test:")
     logger.info("Enter inferencing")
-    # evaluator = Evaluator(test_img_loader, test_txt_loader)
     evaluator = Evaluator_OR(test_img_loader, test_txt_loader)
-    top1 = evaluator.eval(model.eval(),modalities=modalities)
+
+    return evaluator.eval(model.eval())

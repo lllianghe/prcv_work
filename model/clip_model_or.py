@@ -424,13 +424,12 @@ class CLIP(nn.Module):
 
         return x
 
-    def forward(self, vis_images, cp_images, sk_images, nir_images, text):
-        # 对四种图像模态分别提取特征
-        vis_img_feats = self.encode_image(vis_images)   # 对真实图像提取特征
-        cp_img_feats = self.encode_image(cp_images)     # 对彩铅图像提取特征
-        sk_img_feats = self.encode_image(sk_images)     # 对素描图像提取特征
-        nir_img_feats = self.encode_image(nir_images)   # 对红外图像提取特征
-        text_feats = self.encode_text(text)             # 对文本提取特征
+    def forward(self, vis_images=None, cp_images=None, sk_images=None, nir_images=None, text=None):
+        vis_img_feats = self.encode_image(vis_images) if vis_images is not None else None
+        cp_img_feats = self.encode_image(cp_images) if cp_images is not None else None
+        sk_img_feats = self.encode_image(sk_images) if sk_images is not None else None
+        nir_img_feats = self.encode_image(nir_images) if nir_images is not None else None
+        text_feats = self.encode_text(text) if text is not None else None
         return vis_img_feats, cp_img_feats, sk_img_feats, nir_img_feats, text_feats
     
     

@@ -91,11 +91,12 @@ class Evaluator():
             i2t_cmc, i2t_mAP, i2t_mINP = i2t_cmc.numpy(), i2t_mAP.numpy(), i2t_mINP.numpy()
             table.add_row(['i2t', i2t_cmc[0], i2t_cmc[4], i2t_cmc[9], i2t_mAP, i2t_mINP])
         # table.float_format = '.4'
-        table.custom_format["R1"] = lambda f, v: f"{v:.3f}"
-        table.custom_format["R5"] = lambda f, v: f"{v:.3f}"
-        table.custom_format["R10"] = lambda f, v: f"{v:.3f}"
-        table.custom_format["mAP"] = lambda f, v: f"{v:.3f}"
-        table.custom_format["mINP"] = lambda f, v: f"{v:.3f}"
+        table.custom_format["R1"] = lambda f, v: f"{v:.3f}" if isinstance(v, (int, float)) else str(v)
+        table.custom_format["R5"] = lambda f, v: f"{v:.3f}" if isinstance(v, (int, float)) else str(v)
+        table.custom_format["R10"] = lambda f, v: f"{v:.3f}" if isinstance(v, (int, float)) else str(v)
+        table.custom_format["mAP"] = lambda f, v: f"{v:.3f}" if isinstance(v, (int, float)) else str(v)
+        table.custom_format["mINP"] = lambda f, v: f"{v:.3f}" if isinstance(v, (int, float)) else str(v)
+        table.hrules = 1
         self.logger.info('\n' + str(table))
         
         return t2i_cmc[0]
@@ -108,79 +109,114 @@ class Evaluator_OR():
         self.txt_loader = txt_loader # query
         self.logger = logging.getLogger("IRRA.eval")
 
-    def _compute_embedding(self, model,modalities):
+    def _compute_embedding(self, model):
         model = model.eval()
         device = next(model.parameters()).device
 
-        qids, gids, qfeats, gfeats = [], [], [], []
-        # text
-        modalities_list = modalities.split("_") 
+        qids, gids = [], []
+        gfeats = []
+        # A dictionary to store features for each modality
+        qfeats_dict = {'TEXT': [], 'CP': [], 'SK': [], 'NIR': []}
+
+        # text/query loader
         for pid, cp_img, sk_img, nir_img, caption in self.txt_loader:
+            qids.append(pid.view(-1))
             with torch.no_grad():
-                feats = []
-                if 'TEXT' in modalities_list:
-                    caption = caption.to(device)
-                    text_feat = model.encode_text(caption)
-                    feats.append(text_feat)
+                # TEXT
+                caption = caption.to(device)
+                text_feat = model.encode_text(caption)
+                qfeats_dict['TEXT'].append(text_feat)
+                # CP
+                cp_img = cp_img.to(device)
+                cp_feat = model.encode_image(cp_img)
+                qfeats_dict['CP'].append(cp_feat)
+                # SK
+                sk_img = sk_img.to(device)
+                sk_feat = model.encode_image(sk_img)
+                qfeats_dict['SK'].append(sk_feat)
+                # NIR
+                nir_img = nir_img.to(device)
+                nir_feat = model.encode_image(nir_img)
+                qfeats_dict['NIR'].append(nir_feat)
 
-                # 根据modalities_list来计算图像特征，按需计算
-                if 'CP' in modalities_list:
-                    cp_img = cp_img.to(device)
-                    cp_feat = model.encode_image(cp_img)
-                    feats.append(cp_feat)
-
-                if 'SK' in modalities_list:
-                    sk_img = sk_img.to(device)
-                    sk_feat = model.encode_image(sk_img)
-                    feats.append(sk_feat)
-
-                if 'NIR' in modalities_list:
-                    nir_img = nir_img.to(device)
-                    nir_feat = model.encode_image(nir_img)
-                    feats.append(nir_feat)
-            img_feats = sum(feats) / len(feats) if feats else None  # 避免空列表除以0的错误
-            qids.append(pid.view(-1))  # Flatten the pid tensor
-            qfeats.append(img_feats)  #
         qids = torch.cat(qids, 0)
-        qfeats = torch.cat(qfeats, 0)
+        for modality in qfeats_dict:
+            if qfeats_dict[modality] and len(qfeats_dict[modality]) > 0:
+                 qfeats_dict[modality] = torch.cat(qfeats_dict[modality], 0)
 
-
-        # image
+        # image/gallery loader
         for pid, img in self.img_loader:
             img = img.to(device)
             with torch.no_grad():
                 img_feat = model.encode_image(img)
-            gids.append(pid.view(-1)) # flatten 
+            gids.append(pid.view(-1))
             gfeats.append(img_feat)
         gids = torch.cat(gids, 0)
         gfeats = torch.cat(gfeats, 0)
 
-        return qfeats, gfeats, qids, gids
+        return qfeats_dict, gfeats, qids, gids
     
-    def eval(self, model, i2t_metric=False,modalities="fourmodal_SK_TEXT_CP_NIR"):
+    def eval(self, model, i2t_metric=False, modalities=["onemodal_SK", "onemodal_NIR", "onemodal_CP", "onemodal_TEXT", '' ,"twomodal_SK_Nir", "twomodal_SK_CP","twomodal_SK_TEXT", "twomodal_NIR_CP", "twomodal_NIR_TEXT", "twomodal_CP_TEXT", '', "threemodal_SK_NIR_CP", "threemodal_SK_NIR_TEXT", "threemodal_SK_CP_TEXT", "threemodal_NIR_CP_TEXT", '', "fourmodal_SK_TEXT_CP_NIR"]):
+        # Step 1: Compute all embeddings once
+        qfeats_dict, gfeats, qids, gids = self._compute_embedding(model)
+        gfeats = F.normalize(gfeats, p=2, dim=1)  # image features (gallery)
 
-        qfeats, gfeats, qids, gids = self._compute_embedding(model, modalities)
+        all_r1s = []
+        all_mAPs = []
+        result_rows = []
 
-        qfeats = F.normalize(qfeats, p=2, dim=1) # text features
-        gfeats = F.normalize(gfeats, p=2, dim=1) # image features
+        # Step 2: Loop through each evaluation strategy
+        for modality_strategy in modalities:
+            if modality_strategy == '':
+                result_rows.append([''] * 6)
+                continue
 
-        similarity = qfeats @ gfeats.t()
+            modalities_list = modality_strategy.split("_")[1:] # e.g., from "fourmodal_SK_TEXT_CP_NIR" to ['SK', 'TEXT', 'CP', 'NIR']
+            
+            # Combine features for the current strategy
+            feats_to_combine = [qfeats_dict[m] for m in modalities_list if m in qfeats_dict and len(qfeats_dict[m]) > 0]
+            if not feats_to_combine:
+                self.logger.warning(f"No features found for modality strategy: {modality_strategy}. Skipping.")
+                continue
+            
+            qfeats = sum(feats_to_combine) / len(feats_to_combine)
+            qfeats = F.normalize(qfeats, p=2, dim=1)  # text features (query)
 
-        t2i_cmc, t2i_mAP, t2i_mINP, _ = rank(similarity=similarity, q_pids=qids, g_pids=gids, max_rank=10, get_mAP=True)
-        t2i_cmc, t2i_mAP, t2i_mINP = t2i_cmc.numpy(), t2i_mAP.numpy(), t2i_mINP.numpy()
+            # Calculate similarity
+            similarity = qfeats @ gfeats.t()
+
+            # Rank and get metrics
+            t2i_cmc, t2i_mAP, t2i_mINP, _ = rank(similarity=similarity, q_pids=qids, g_pids=gids, max_rank=10, get_mAP=True)
+            t2i_cmc, t2i_mAP, t2i_mINP = t2i_cmc.numpy(), t2i_mAP.numpy(), t2i_mINP.numpy()
+            
+            all_r1s.append(t2i_cmc[0])
+            all_mAPs.append(t2i_mAP)
+
+            # Add to table
+            result_rows.append([modality_strategy, t2i_cmc[0], t2i_cmc[4], t2i_cmc[9], t2i_mAP, t2i_mINP])
+
+
+            if i2t_metric:
+                i2t_cmc, i2t_mAP, i2t_mINP, _ = rank(similarity=similarity.t(), q_pids=gids, g_pids=qids, max_rank=10, get_mAP=True)
+                i2t_cmc, i2t_mAP, i2t_mINP = i2t_cmc.numpy(), i2t_mAP.numpy(), i2t_mINP.numpy()
+                result_rows.append([f'i2t_{modality_strategy}', i2t_cmc[0], i2t_cmc[4], i2t_cmc[9], i2t_mAP, i2t_mINP])
+
         table = PrettyTable(["task", "R1", "R5", "R10", "mAP", "mINP"])
-        table.add_row([modalities, t2i_cmc[0], t2i_cmc[4], t2i_cmc[9], t2i_mAP, t2i_mINP])
+        avg_r1 = np.mean(all_r1s)
+        avg_mAP = np.mean(all_mAPs)
+        table.add_row(['Average', avg_r1, '-', '-', avg_mAP, '-'])
+        table.add_row([''] * 6)
 
-        if i2t_metric:
-            i2t_cmc, i2t_mAP, i2t_mINP, _ = rank(similarity=similarity.t(), q_pids=gids, g_pids=qids, max_rank=10, get_mAP=True)
-            i2t_cmc, i2t_mAP, i2t_mINP = i2t_cmc.numpy(), i2t_mAP.numpy(), i2t_mINP.numpy()
-            table.add_row(['i2t', i2t_cmc[0], i2t_cmc[4], i2t_cmc[9], i2t_mAP, i2t_mINP])
-        # table.float_format = '.4'
-        table.custom_format["R1"] = lambda f, v: f"{v:.3f}"
-        table.custom_format["R5"] = lambda f, v: f"{v:.3f}"
-        table.custom_format["R10"] = lambda f, v: f"{v:.3f}"
-        table.custom_format["mAP"] = lambda f, v: f"{v:.3f}"
-        table.custom_format["mINP"] = lambda f, v: f"{v:.3f}"
+        for row in result_rows:
+            table.add_row(row)
+
+        # Formatting and logging
+        table.custom_format["R1"] = lambda f, v: f"{v:.3f}" if isinstance(v, (int, float)) else str(v)
+        table.custom_format["R5"] = lambda f, v: f"{v:.3f}" if isinstance(v, (int, float)) else str(v)
+        table.custom_format["R10"] = lambda f, v: f"{v:.3f}" if isinstance(v, (int, float)) else str(v)
+        table.custom_format["mAP"] = lambda f, v: f"{v:.3f}" if isinstance(v, (int, float)) else str(v)
+        table.custom_format["mINP"] = lambda f, v: f"{v:.3f}" if isinstance(v, (int, float)) else str(v)
+        table.hrules = 1
         self.logger.info('\n' + str(table))
         
-        return t2i_cmc[0]
+        return avg_r1, avg_mAP

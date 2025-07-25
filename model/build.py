@@ -105,47 +105,175 @@ class IRRA(nn.Module):
             return x[torch.arange(x.shape[0]), text.argmax(dim=-1)].float()
 
     def forward(self, batch):
+
         ret = dict()
-        if self.args.dataset_name == 'ORBench':
+        if 'multi_modal_contrastive' in self.current_task: # 新增：多模态对比损失
             vis_images = batch['vis_images']
             cp_images = batch['cp_images']
             sk_images = batch['sk_images']
             nir_images = batch['nir_images']
             caption_ids = batch['caption_ids']
-            vis_img_feats, cp_img_feats, sk_img_feats, nir_img_feats, text_feats = self.base_model(
-                vis_images, cp_images, sk_images, nir_images, caption_ids
-            )
-            if self.is_safetensors:
-                vis_img_feat = vis_img_feats.float()
-                cp_img_feat = cp_img_feats.float()
-                sk_img_feat = sk_img_feats.float()
-                nir_img_feat = nir_img_feats.float()
-                text_feat = text_feats.float()
-            else:
-                vis_img_feat = vis_img_feats[:,0,:].float()
-                cp_img_feat = cp_img_feats[:,0,:].float()
-                sk_img_feat = sk_img_feats[:,0,:].float()
-                nir_img_feat = nir_img_feats[:,0,:].float()
-                text_feat = text_feats[torch.arange(text_feats.shape[0]), caption_ids.argmax(dim=-1)].float()
-            i_feats = vis_img_feat
-            t_feats = (text_feat + cp_img_feat+sk_img_feat+nir_img_feat) * 0.25
-           
-        else:
-            images = batch['images']
-            caption_ids = batch['caption_ids']
-            image_feats, text_feats = self.base_model(images, caption_ids)
-            i_feats = image_feats[:, 0, :].float() # 选择第一个特征
-            # i_feats = image_feats.float() # for CLIP ResNet visual model
-            t_feats = text_feats[torch.arange(text_feats.shape[0]), caption_ids.argmax(dim=-1)].float()
+            logit_scale = self.logit_scale
+            ret.update({'temperature': 1 / logit_scale})
 
-        logit_scale = self.logit_scale
-        ret.update({'temperature': 1 / logit_scale})
-        # 输入模态的融合特征为t_feats, 真实照片的特征为i_feats
-        if 'itc' in self.current_task:
-            ret.update({'itc_loss':objectives.compute_itc(i_feats, t_feats, logit_scale)})
-        
-        if 'sdm' in self.current_task:
-            ret.update({'sdm_loss':objectives.compute_sdm(i_feats, t_feats, batch['pids'], logit_scale)})
+            query_feats = {
+                'text': caption_ids,
+                'cp': cp_images,
+                'sk': sk_images,
+                'nir': nir_images
+            }
+
+            if 'itc' in self.current_task:
+                multi_modal_contrastive_itc_loss = 0
+                for modal_name, modal_data in query_feats.items(): # 遍历每个查询模态
+
+                    # 1.encoder计算特征
+                    vis_img_feats, _, _, _, _ = self.base_model(vis_images=vis_images)
+
+                    if self.is_safetensors:
+                        i_feats = vis_img_feats.float()
+                    else:
+                        i_feats = vis_img_feats[:,0,:].float()
+
+                    if modal_name == 'text':
+                        _, _, _, _, text_feats = self.base_model(text=modal_data)
+                        if self.is_safetensors:
+                            t_feats_modal = text_feats.float()
+                        else:
+                            t_feats_modal = text_feats[torch.arange(text_feats.shape[0]), modal_data.argmax(dim=-1)].float()
+                    elif modal_name == 'cp':
+                        _, cp_img_feats, _, _, _ = self.base_model(cp_images=modal_data)
+                        if self.is_safetensors:
+                            t_feats_modal = cp_img_feats.float()
+                        else:
+                            t_feats_modal = cp_img_feats[:,0,:].float()
+                    elif modal_name == 'sk':
+                        _, _, sk_img_feats, _, _ = self.base_model(sk_images=modal_data)
+                        if self.is_safetensors:
+                            t_feats_modal = sk_img_feats.float()
+                        else:
+                            t_feats_modal = sk_img_feats[:,0,:].float()
+                    elif modal_name == 'nir':
+                        _, _, _, nir_img_feats, _ = self.base_model(nir_images=modal_data)
+                        if self.is_safetensors:
+                            t_feats_modal = nir_img_feats.float()
+                        else:
+                            t_feats_modal = nir_img_feats[:,0,:].float()
+                    
+
+                    # 2.计算loss
+                    loss = objectives.compute_itc(i_feats, t_feats_modal, logit_scale) # 计算图文对比损失, loss为scalar张量
+                    ret.update({f'{modal_name}_itc_Loss': loss.detach()}) # 保存每个模态的loss, detach后不带计算图, 大写L避免被计入总损失
+                    
+                    # 3.backward计算梯度
+                    loss.backward() # 反向传播, 计算当前模态损失对模型参数的梯度.
+                    
+                    multi_modal_contrastive_itc_loss += loss.detach() # 累加loss的值, .detach()使其不带计算图, 避免在后续total_loss.backward()中重复计算梯度
+                ret.update({'multi_modal_contrastive_itc_loss': multi_modal_contrastive_itc_loss / len(query_feats)})
+
+            if 'sdm' in self.current_task:
+                multi_modal_contrastive_sdm_loss = 0
+                for modal_name, modal_data in query_feats.items(): # 遍历每个查询模态
+                    # 1.encoder计算特征
+                    vis_img_feats, _, _, _, _ = self.base_model(vis_images=vis_images)
+                    if self.is_safetensors:
+                        i_feats = vis_img_feats.float()
+                    else:
+                        i_feats = vis_img_feats[:,0,:].float()
+
+                    if modal_name == 'text':
+                        _, _, _, _, text_feats = self.base_model(text=modal_data)
+                        if self.is_safetensors:
+                            t_feats_modal = text_feats.float()
+                        else:
+                            t_feats_modal = text_feats[torch.arange(text_feats.shape[0]), modal_data.argmax(dim=-1)].float()
+                    elif modal_name == 'cp':
+                        _, cp_img_feats, _, _, _ = self.base_model(cp_images=modal_data)
+                        if self.is_safetensors:
+                            t_feats_modal = cp_img_feats.float()
+                        else:
+                            t_feats_modal = cp_img_feats[:,0,:].float()
+                    elif modal_name == 'sk':
+                        _, _, sk_img_feats, _, _ = self.base_model(sk_images=modal_data)
+                        if self.is_safetensors:
+                            t_feats_modal = sk_img_feats.float()
+                        else:
+                            t_feats_modal = sk_img_feats[:,0,:].float()
+                    elif modal_name == 'nir':
+                        _, _, _, nir_img_feats, _ = self.base_model(nir_images=modal_data)
+                        if self.is_safetensors:
+                            t_feats_modal = nir_img_feats.float()
+                        else:
+                            t_feats_modal = nir_img_feats[:,0,:].float()
+
+                    # 2.计算loss
+                    loss = objectives.compute_sdm(i_feats, t_feats_modal, batch['pids'], logit_scale) # 计算sdm损失, loss为scalar张量
+                    ret.update({f'{modal_name}_sdm_Loss': loss.detach()}) # 保存每个模态的loss, detach后不带计算图, 大写L避免被计入总损失
+                    # 3.backward计算梯度
+                    loss.backward() # 反向传播, 计算当前模态损失对模型参数的梯度
+                    multi_modal_contrastive_sdm_loss += loss.detach() # 累加loss的值, .detach()使其不带计算图, 避免在后续total_loss.backward()中重复计算梯度
+                ret.update({'multi_modal_contrastive_sdm_loss': multi_modal_contrastive_sdm_loss / len(query_feats)}) # 平均损失
+
+            # 如果需要计算后续损失, 则重新计算i_feats和t_feats以兼容id loss
+            if any(task in self.current_task for task in ['id', 'mlm', 'cmpm']):
+                vis_img_feats, cp_img_feats, sk_img_feats, nir_img_feats, text_feats = self.base_model(
+                    vis_images, cp_images, sk_images, nir_images, caption_ids
+                )
+                if self.is_safetensors:
+                    vis_img_feat = vis_img_feats.float()
+                    cp_img_feat = cp_img_feats.float()
+                    sk_img_feat = sk_img_feats.float()
+                    nir_img_feat = nir_img_feats.float()
+                    text_feat = text_feats.float()
+                else:
+                    vis_img_feat = vis_img_feats[:,0,:].float()
+                    cp_img_feat = cp_img_feats[:,0,:].float()
+                    sk_img_feat = sk_img_feats[:,0,:].float()
+                    nir_img_feat = nir_img_feats[:,0,:].float()
+                    text_feat = text_feats[torch.arange(text_feats.shape[0]), caption_ids.argmax(dim=-1)].float()
+                i_feats = vis_img_feat
+                t_feats = (text_feat + cp_img_feat+sk_img_feat+nir_img_feat) * 0.25
+        else:
+            if self.args.dataset_name == 'ORBench':
+                vis_images = batch['vis_images']
+                cp_images = batch['cp_images']
+                sk_images = batch['sk_images']
+                nir_images = batch['nir_images']
+                caption_ids = batch['caption_ids']
+                vis_img_feats, cp_img_feats, sk_img_feats, nir_img_feats, text_feats = self.base_model(
+                    vis_images, cp_images, sk_images, nir_images, caption_ids
+                )
+                if self.is_safetensors:
+                    vis_img_feat = vis_img_feats.float()
+                    cp_img_feat = cp_img_feats.float()
+                    sk_img_feat = sk_img_feats.float()
+                    nir_img_feat = nir_img_feats.float()
+                    text_feat = text_feats.float()
+                else:
+                    vis_img_feat = vis_img_feats[:,0,:].float()
+                    cp_img_feat = cp_img_feats[:,0,:].float()
+                    sk_img_feat = sk_img_feats[:,0,:].float()
+                    nir_img_feat = nir_img_feats[:,0,:].float()
+                    text_feat = text_feats[torch.arange(text_feats.shape[0]), caption_ids.argmax(dim=-1)].float()
+                i_feats = vis_img_feat
+                t_feats = (text_feat + cp_img_feat+sk_img_feat+nir_img_feat) * 0.25
+            
+            else:
+                images = batch['images']
+                caption_ids = batch['caption_ids']
+                image_feats, text_feats = self.base_model(images, caption_ids)
+                i_feats = image_feats[:, 0, :].float() # 选择第一个特征
+                # i_feats = image_feats.float() # for CLIP ResNet visual model
+                t_feats = text_feats[torch.arange(text_feats.shape[0]), caption_ids.argmax(dim=-1)].float()
+
+            logit_scale = self.logit_scale
+            ret.update({'temperature': 1 / logit_scale})
+
+            if 'itc' in self.current_task:
+                ret.update({'itc_loss':objectives.compute_itc(i_feats, t_feats, logit_scale)})
+            
+            if 'sdm' in self.current_task:
+                ret.update({'sdm_loss':objectives.compute_sdm(i_feats, t_feats, batch['pids'], logit_scale)})
 
         if 'cmpm' in self.current_task:
             ret.update({'cmpm_loss':objectives.compute_cmpm(i_feats, t_feats, batch['pids'])})

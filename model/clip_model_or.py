@@ -536,8 +536,12 @@ def build_CLIP_from_openai_pretrained(name: str, image_size: Union[int, Tuple[in
         except Exception as e:
             raise RuntimeError(f"Failed to load safetensors file {model_path}: {e}")
         
+        # model_cfg = {
+        #     'embed_dim': 512   # according to the config.json
+        # }
+
         model_cfg = {
-            'embed_dim': 512   # according to the config.json
+            'embed_dim': 768   # according to the config.json
         }
         
         return model, model_cfg

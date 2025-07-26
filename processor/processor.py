@@ -107,6 +107,11 @@ def do_train(start_epoch, args, model, train_loader, evaluator, optimizer,
                         info_str += f", {k}: {v.avg:.4f}"
                 info_str += f", Base Lr: {scheduler.get_lr()[0]:.2e}"
                 logger.info(info_str)
+
+            if (n_iter + 1) % args.scheduler_period == 0:
+                scheduler.step(args.scheduler_period)
+                # print(f"Epoch {epoch}, Iteration {n_iter + 1}, Lr: {scheduler.get_lr()[0]:.2e}")
+
         
         tb_writer.add_scalar('lr', scheduler.get_lr()[0], epoch)
         tb_writer.add_scalar('temperature', ret['temperature'], epoch)
@@ -126,15 +131,11 @@ def do_train(start_epoch, args, model, train_loader, evaluator, optimizer,
         if epoch % eval_period == 0:
             if get_rank() == 0:
                 logger.info("Validation Results - Epoch: {}".format(epoch))
-                if isinstance(evaluator, Evaluator_OR):
-                    modalities = ["fourmodal_SK_TEXT_CP_NIR", "onemodal_TEXT", "onemodal_CP", "onemodal_SK", "onemodal_NIR"]
-                else:
-                    modalities = None
 
                 if args.distributed:
-                    r1, mAP = evaluator.eval(model.module.eval(), modalities=modalities)
+                    r1, mAP = evaluator.eval(model.module.eval())
                 else:
-                    r1, mAP = evaluator.eval(model.eval(), modalities=modalities)
+                    r1, mAP = evaluator.eval(model.eval())
 
                 torch.cuda.empty_cache()
                 if best_r1 < r1:

@@ -20,16 +20,20 @@ DATASET_NAME="ORBench"
 # --weight_decay 1e-3 \
 
 
-CUDA_VISIBLE_DEVICES=7 \
+CUDA_VISIBLE_DEVICES=4 \
 python train.py \
---loss_name 'multi_modal_contrastive+itc' \
---lr 5e-6 \
---test_size 0.125 \
---eval_period 1 \
 --batch_size 60 \
---num_epoch 20 \
+--loss_name 'multi_modal_contrastive+sdm' \
+--scheduler_period 30 \
+--warmup_epochs 1000 \
+--lr 5e-6 \
+--annealing_epochs 4000 \
+--min_lr 1e-7 \
+--num_epoch 30 \
 --pretrain_choice '/SSD_Data01/zyl/prcv_work/model_cache/huggingface_model/model.safetensors' \
 --root_dir '/SSD_Data01/PRCV-ReID5o/data/' \
+--test_size 0.125 \
+--eval_period 1 \
 --name irra \
 --img_aug \
 --MLM \

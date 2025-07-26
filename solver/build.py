@@ -54,11 +54,14 @@ def build_lr_scheduler(args, optimizer):
         optimizer,
         milestones=args.milestones,
         gamma=args.gamma,
+        warmup_method=args.warmup_method,
         warmup_factor=args.warmup_factor,
         warmup_epochs=args.warmup_epochs,
-        warmup_method=args.warmup_method,
+        annealing_epochs=args.annealing_epochs, # 新的参数, epoch=step
+        min_lr=args.min_lr,
         total_epochs=args.num_epoch,
         mode=args.lrscheduler,
         target_lr=args.target_lr,
         power=args.power,
+        
     )

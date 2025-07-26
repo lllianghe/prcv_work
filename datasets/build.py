@@ -101,12 +101,12 @@ def build_dataloader(args, tranforms=None):
                 logger.info('using ddp random identity sampler')
                 logger.info('DISTRIBUTED TRAIN START')
                 mini_batch_size = args.batch_size // get_world_size()
-                # TODO wait to fix bugs
-                data_sampler = RandomIdentitySampler_DDP(
-                    dataset.train, args.batch_size, args.num_instance)
-                batch_sampler = torch.utils.data.sampler.BatchSampler(
-                    data_sampler, mini_batch_size, True)
-
+                data_sampler = RandomIdentitySampler_DDP(dataset.train, args.batch_size, args.num_instance)
+                batch_sampler = torch.utils.data.sampler.BatchSampler(data_sampler, mini_batch_size, True)
+                train_loader = DataLoader(train_set,
+                                          batch_sampler=batch_sampler,
+                                          num_workers=num_workers,
+                                          collate_fn=collate)
             else:
                 logger.info(
                     f'using random identity sampler: batch_size: {args.batch_size}, id: {args.batch_size // args.num_instance}, instance: {args.num_instance}'
@@ -157,6 +157,7 @@ def build_dataloader(args, tranforms=None):
                                     batch_size=args.batch_size,
                                     shuffle=False,
                                     num_workers=num_workers)
+        # print(len(train_loader), len(val_img_loader), len(val_txt_loader))
         return train_loader, val_img_loader, val_txt_loader, num_classes
 
     else:

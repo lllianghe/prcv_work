@@ -154,8 +154,8 @@ if __name__ == '__main__':
     # parser.add_argument("--config_file", default='logs/ORBench/20250715_021439_irra/configs.yaml') #这是fgclip的模型
     args = parser.parse_args()
     args = load_train_configs(args.config_file)
-    args.test_batch_size = 256
     args.training = False
+    args.test_batch_size =256
     logger = setup_logger('IRRA', save_dir=args.output_dir, if_train=args.training)
     logger.info(args)
     device = "cuda"
@@ -165,7 +165,7 @@ if __name__ == '__main__':
     test_gallery_dataset = GalleryDataset('data_files/ORBench_PRCV/val/gallery',transform=test_transforms)
     test_gallery_loader = DataLoader(test_gallery_dataset, batch_size=args.test_batch_size, shuffle=False)
     
-    model = build_model(args,num_classes=350) #num_class必须和之前构建的model中的num_class对应
+    model = build_model(args,num_classes=int(400*(1-args.test_size))) #num_class必须和之前构建的model中的num_class对应
     checkpointer = Checkpointer(model)
     checkpointer.load(f=op.join(args.output_dir, 'best.pth'))
     model.to(device)

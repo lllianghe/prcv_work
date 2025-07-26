@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-
+import gc # 回收
 
 def compute_sdm(image_fetures, text_fetures, pid, logit_scale, image_id=None, factor=0.3, epsilon=1e-8):
     """
@@ -53,10 +53,9 @@ def compute_itc(image_features, text_features, logit_scale):
     image-text contrastive (ITC) loss, InfoNCE
     """
     batch_size = image_features.shape[0]
-    labels = torch.arange(start=0, end=batch_size, dtype=torch.int64)
-    labels = labels.to(image_features.device)
+    # The device should be inferred from the input tensors.
+    labels = torch.arange(start=0, end=batch_size, dtype=torch.int64, device=image_features.device)
 
-    
     # normalized features
     image_norm = image_features / image_features.norm(dim=-1, keepdim=True)
     text_norm = text_features / text_features.norm(dim=-1, keepdim=True)
@@ -66,8 +65,15 @@ def compute_itc(image_features, text_features, logit_scale):
     logits_per_text = logits_per_image.t()
 
     loss_i = F.cross_entropy(logits_per_image, labels)
-    loss_t =F.cross_entropy(logits_per_text, labels)
+    loss_t = F.cross_entropy(logits_per_text, labels)
+
     loss = (loss_i +  loss_t)/2
+    loss.backward() # 不释放计算图
+    loss=loss.detach()
+
+    # --------------------------
+    # 反向释放（从最下游开始）
+    # --------------------------
 
     return loss
 

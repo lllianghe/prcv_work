@@ -7,9 +7,9 @@ def get_args():
     parser.add_argument("--local_rank", default=0, type=int)
     parser.add_argument("--name", default="irra", help="experiment name to save")
     parser.add_argument("--output_dir", default="logs")
-    parser.add_argument("--log_period", default=100)
-    parser.add_argument("--eval_period", default=1)
-    parser.add_argument("--val_dataset", default="test") # use val set when evaluate, if test use test set
+    parser.add_argument("--log_period", type=int, default=30)
+    parser.add_argument("--eval_period", type=float, default=1)
+    parser.add_argument("--val_dataset",default="test") # use val set when evaluate, if test use test set
     parser.add_argument("--resume", default=False, action='store_true')
     parser.add_argument("--resume_ckpt_file", default="", help='resume from ...')
 
@@ -52,9 +52,12 @@ def get_args():
     parser.add_argument("--num_epoch", type=int, default=60)
     parser.add_argument("--milestones", type=int, nargs='+', default=(20, 50))
     parser.add_argument("--gamma", type=float, default=0.1)
-    parser.add_argument("--warmup_factor", type=float, default=0.1)
-    parser.add_argument("--warmup_epochs", type=int, default=5)
     parser.add_argument("--warmup_method", type=str, default="linear")
+    parser.add_argument("--warmup_factor", type=float, default=0.1)
+    parser.add_argument("--warmup_epochs", type=int, default=400)
+    parser.add_argument("--annealing_epochs", type=int, default=2000) # 新的参数, epoch的含义是step
+    parser.add_argument("--min_lr", type=float, default=1e-7)
+    parser.add_argument("--scheduler_period", type=int, default=50)
     parser.add_argument("--lrscheduler", type=str, default="cosine")
     parser.add_argument("--target_lr", type=float, default=0)
     parser.add_argument("--power", type=float, default=0.9)
@@ -62,7 +65,7 @@ def get_args():
     ######################## dataset ########################
     parser.add_argument("--dataset_name", default='ORBench', help="[CUHK-PEDES, ICFG-PEDES, RSTPReid, ORBench]")
     # parser.add_argument("--dataset_name", default='CUHK-PEDES', help="[CUHK-PEDES, ICFG-PEDES, RSTPReid, ORBench]")
-    parser.add_argument("--sampler", default="random", help="choose sampler from [idtentity, random]")
+    parser.add_argument("--sampler", default="random", help="choose sampler from [identity, random]")
     parser.add_argument("--num_instance", type=int, default=4)
     parser.add_argument("--root_dir", default="data_files")
     parser.add_argument("--batch_size", type=int, default=32) # batch_size原来是64

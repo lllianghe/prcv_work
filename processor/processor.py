@@ -6,6 +6,44 @@ from utils.metrics import Evaluator, Evaluator_OR
 from utils.comm import get_rank, synchronize
 from torch.utils.tensorboard import SummaryWriter
 from prettytable import PrettyTable
+import matplotlib.pyplot as plt
+import os
+
+def plot_and_save_curves(output_dir, num_iter_per_epoch, train_loss_list, mAP_list, lr_list, log_period, eval_iters_list=None, eval_epoch_list=None):
+    plt.figure(figsize=(18, 5))
+
+    # Plotting Training Loss
+    plt.subplot(1, 3, 1)
+    plt.plot(eval_iters_list, train_loss_list, label='Train Loss')
+    plt.xlabel(f'x{log_period} Steps ({num_iter_per_epoch} per epoch)')
+    plt.ylabel('Loss')
+    plt.legend()
+    plt.title('Training Loss Curve')
+    plt.grid(True)
+
+    # Plotting mAP Score
+    plt.subplot(1, 3, 2)
+    if eval_epoch_list:
+        plt.plot(eval_epoch_list, mAP_list, label='mAP', marker='o')
+    plt.xlabel('Eval-Epoch')
+    plt.ylabel('mAP Score')
+    plt.legend()
+    plt.title('mAP Curve')
+    plt.grid(True)
+
+    # Plotting Learning Rate
+    plt.subplot(1, 3, 3)
+    plt.plot(eval_iters_list, lr_list, label='Learning Rate')
+    plt.xlabel(f'x{log_period} Steps ({num_iter_per_epoch} per epoch)')
+    plt.ylabel('Learning Rate')
+    plt.legend()
+    plt.title('Learning Rate Curve')
+    plt.grid(True)
+
+    plt.tight_layout()
+    save_path = os.path.join(output_dir, 'curves.png')
+    plt.savefig(save_path)
+    plt.close()
 
 
 def do_train(start_epoch, args, model, train_loader, evaluator, optimizer,
@@ -48,6 +86,14 @@ def do_train(start_epoch, args, model, train_loader, evaluator, optimizer,
 
     best_r1 = 0.0
     best_mAP = 0.0
+
+    # Lists to store metrics for plotting
+    train_loss_list = []
+    mAP_list = []
+    lr_list = []
+    eval_iters_list = []
+    eval_epoch_list = []
+    eval_count = 0
 
     # train
     for epoch in range(start_epoch, num_epoch + 1):
@@ -100,6 +146,12 @@ def do_train(start_epoch, args, model, train_loader, evaluator, optimizer,
             synchronize() # 分布式计算相关
 
             if (n_iter + 1) % log_period == 0:
+                eval_count += 1
+                train_loss_list.append(meters['loss'].avg)
+                lr_list.append(scheduler.get_lr()[0])
+                eval_iters_list.append(eval_count)
+                plot_and_save_curves(args.output_dir, len(train_loader), train_loss_list, mAP_list, lr_list, log_period, eval_iters_list, eval_epoch_list)
+
                 info_str = f"Epoch[{epoch}] Iteration[{n_iter + 1}/{len(train_loader)}]"
                 # log loss and acc info
                 for k, v in meters.items():
@@ -136,6 +188,10 @@ def do_train(start_epoch, args, model, train_loader, evaluator, optimizer,
                     r1, mAP = evaluator.eval(model.module.eval())
                 else:
                     r1, mAP = evaluator.eval(model.eval())
+                
+                eval_epoch_list.append(epoch)
+                mAP_list.append(mAP)
+                plot_and_save_curves(args.output_dir, len(train_loader), train_loss_list, mAP_list, lr_list, log_period, eval_iters_list, eval_epoch_list)
 
                 torch.cuda.empty_cache()
                 if best_r1 < r1:

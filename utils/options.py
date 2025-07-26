@@ -65,7 +65,7 @@ def get_args():
     ######################## dataset ########################
     parser.add_argument("--dataset_name", default='ORBench', help="[CUHK-PEDES, ICFG-PEDES, RSTPReid, ORBench]")
     # parser.add_argument("--dataset_name", default='CUHK-PEDES', help="[CUHK-PEDES, ICFG-PEDES, RSTPReid, ORBench]")
-    parser.add_argument("--sampler", default="random", help="choose sampler from [idtentity, random]")
+    parser.add_argument("--sampler", default="random", help="choose sampler from [identity, random]")
     parser.add_argument("--num_instance", type=int, default=4)
     parser.add_argument("--root_dir", default="data_files")
     parser.add_argument("--batch_size", type=int, default=32) # batch_size原来是64

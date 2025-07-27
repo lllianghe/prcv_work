@@ -59,36 +59,34 @@ class ORBENCH(BaseDataset):
         if training:
             dataset = []
             image_id = 0
-            pid_map = {}  # 用于映射每个 id 到连续的 pid
+            pid_map = {}  # 用于映射每个 json中的id 到连续的 pid
             current_pid = 0
+            captions = {} # pid:对应的描述列表
+            vis_img_dir = {} # rgb图片文件夹路径
+            cp_img_dir = {} # 彩铅图片文件夹路径
+            sk_img_dir = {}  # 素描图片文件夹路径
+            nir_img_dir = {} # 红外图片文件夹路径
             for anno in annos:
-                pid = int(anno['id'])  # 获取原始 pid
-                if pid not in pid_map:
-                    pid_map[pid] = current_pid
-                    current_pid += 1
-                pid = pid_map[pid]  # 获取连续的 pid
+                pid_anno = int(anno['id'])  # 获取原始 pid
+                if pid_anno in pid_map: 
+                    pid = pid_map[pid_anno]
+                    captions[pid].append(anno['caption'])
+                    continue # pid取过了 下一个
+                pid_map[pid_anno] = current_pid
+                pid = current_pid
+                current_pid += 1
                 pid_container.add(pid)
-                vis_img_path = os.path.join(self.img_dir, anno['file_path'])
-                pid_str = anno['file_path'].split('/')[1] 
-                cp_img_dir = os.path.join(self.img_dir, 'cp', pid_str)  # 彩铅图片文件夹路径
-                sk_img_dir = os.path.join(self.img_dir, 'sk', pid_str)  # 素描图片文件夹路径
-                nir_img_dir = os.path.join(self.img_dir, 'nir', pid_str)  # 红外图片文件夹路径
-                cp_path = random.choice(os.listdir(cp_img_dir)) if os.path.exists(cp_img_dir) else ""
-                sk_path = random.choice(os.listdir(sk_img_dir)) if os.path.exists(sk_img_dir) else ""
-                nir_path = random.choice(os.listdir(nir_img_dir)) if os.path.exists(nir_img_dir) else ""
-                cp_path = os.path.join(cp_img_dir, cp_path) if cp_path else ""
-                sk_path = os.path.join(sk_img_dir, sk_path) if sk_path else ""
-                nir_path = os.path.join(nir_img_dir, nir_path) if nir_path else ""
-
-                # 获取每一行的caption（这里只取一个）
-                caption = anno['caption']
-
-                # 将数据添加到dataset中
-                dataset.append((pid, image_id, vis_img_path, cp_path, sk_path, nir_path, caption))
-                image_id += 1
+                pid_str = anno['file_path'].split('/')[1] # 存的是到哪个小文件夹中去找
+                vis_img_dir[pid] = os.path.join(self.img_dir, 'vis', pid_str) # rgb图片文件夹路径
+                cp_img_dir[pid] = os.path.join(self.img_dir, 'cp', pid_str)  # 彩铅图片文件夹路径
+                sk_img_dir[pid] = os.path.join(self.img_dir, 'sk', pid_str)  # 素描图片文件夹路径
+                nir_img_dir[pid] = os.path.join(self.img_dir, 'nir', pid_str)  # 红外图片文件夹路径
+                captions[pid] = []
+                captions[pid].append(anno['caption'])
+            for pid in range(current_pid): 
+                dataset.append((pid, vis_img_dir[pid], cp_img_dir[pid], sk_img_dir[pid], nir_img_dir[pid],captions[pid]))
             
             return dataset, pid_container
-
 
         else:  # 验证集
             dataset = {

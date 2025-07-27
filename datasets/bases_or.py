@@ -9,7 +9,7 @@ from prettytable import PrettyTable
 import random
 import regex as re
 import copy
-
+import os
 
 class BaseDataset(object):
     """
@@ -210,6 +210,10 @@ class ImageTextMLMDataset(Dataset):
         return torch.tensor(tokens), torch.tensor(labels)
     
 
+def get_random_file_path(directory):
+    if not os.path.exists(directory):
+        raise FileNotFoundError(f"The directory '{directory}' does not exist. train dataset")
+    return os.path.join(directory, random.choice(os.listdir(directory)))
 
 
 
@@ -230,11 +234,16 @@ class ORBenchTrainDataset(Dataset):
 
     def __getitem__(self, index):
         # 从dataset中获取各类数据
-        pid, image_id, vis_img_path, cp_path, sk_path, nir_path, caption = self.dataset[index]
-        vis_img = read_image(vis_img_path)
+        pid, vis_img_dir, cp_img_dir, sk_img_dir, nir_img_dir,captions = self.dataset[index]
+        vis_path = get_random_file_path(vis_img_dir)
+        cp_path = get_random_file_path(cp_img_dir)
+        sk_path = get_random_file_path(sk_img_dir)
+        nir_path = get_random_file_path(nir_img_dir)
+        vis_img = read_image(vis_path)
         cp_img = read_image(cp_path)
         sk_img = read_image(sk_path)
         nir_img = read_image(nir_path)
+        caption = random.choice(captions)
         if self.transform is not None:
             vis_img = self.transform(vis_img)
             cp_img = self.transform(cp_img)
@@ -245,7 +254,6 @@ class ORBenchTrainDataset(Dataset):
 
         ret = {
             'pids': pid,
-            'image_ids': image_id,
             'vis_images': vis_img,  # 真实图片
             'cp_images': cp_img,    # 彩铅图片
             'sk_images': sk_img,    # 素描图片

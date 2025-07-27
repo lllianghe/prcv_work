@@ -32,7 +32,7 @@ python train.py \
 --annealing_epochs 8000 \
 --min_lr 1e-7 \
 --num_epoch 90 \
---pretrain_choice '/SSD_Data01/zyl/prcv_work/model_cache/huggingface_model/model.safetensors' \
+--pretrain_choice '/SSD_Data01/zyl/prcv_work/model_cache/fgclip/model.safetensors' \
 --root_dir '/SSD_Data01/PRCV-ReID5o/data/' \
 --test_size 0.125 \
 --eval_period 1 \

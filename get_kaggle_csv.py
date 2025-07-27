@@ -59,7 +59,7 @@ class KaggleInputDataset(Dataset):
                 cp_image_path = content[i]
             elif modal == 'SK' and i < len(content):
                 sk_image_path = content[i]
-        folder_path = 'data_files/ORBench_PRCV/val' 
+        folder_path = '/SSD_Data01/PRCV-ReID5o/data/ORBench_PRCV/val' 
         nir_image = read_image(os.path.join(folder_path, nir_image_path)) if nir_image_path else None
         cp_image = read_image(os.path.join(folder_path, cp_image_path)) if cp_image_path else None
         sk_image = read_image(os.path.join(folder_path, sk_image_path)) if sk_image_path else None
@@ -159,10 +159,10 @@ if __name__ == '__main__':
     logger = setup_logger('IRRA', save_dir=args.output_dir, if_train=args.training)
     logger.info(args)
     device = "cuda"
-    json_file = 'data_files/ORBench_PRCV/val/val_queries.json'
+    json_file = '/SSD_Data01/PRCV-ReID5o/data/ORBench_PRCV/val/val_queries.json'
     query_type_ranges = get_query_type_idx_range(json_file)
     test_transforms = build_transforms(img_size=args.img_size,is_train=False)
-    test_gallery_dataset = GalleryDataset('data_files/ORBench_PRCV/val/gallery',transform=test_transforms)
+    test_gallery_dataset = GalleryDataset('/SSD_Data01/PRCV-ReID5o/data/ORBench_PRCV/val/gallery',transform=test_transforms)
     test_gallery_loader = DataLoader(test_gallery_dataset, batch_size=args.test_batch_size, shuffle=False)
     
     model = build_model(args,num_classes=int(400*(1-args.test_size))) #num_class必须和之前构建的model中的num_class对应
@@ -173,7 +173,7 @@ if __name__ == '__main__':
     gfeats = embedding_gfeats(test_gallery_loader,model)
     gfeats = F.normalize(gfeats, p=2, dim=1)
     print(f"embedding_gfeats success")
-    json_file = 'data_files/ORBench_PRCV/val/val_queries.json'
+    json_file = '/SSD_Data01/PRCV-ReID5o/data/ORBench_PRCV/val/val_queries.json'
     query_type_ranges = get_query_type_idx_range(json_file)
     output_file='ranking_list.csv'
     with open(output_file, mode='w', newline='') as csvfile:
@@ -182,7 +182,7 @@ if __name__ == '__main__':
         writer.writeheader()
         
         for current_query_type, begin_idx, end_idx in query_type_ranges:
-            test_query_dataset = KaggleInputDataset('data_files/ORBench_PRCV/val/val_queries.json', begin_idx, end_idx, test_transforms)
+            test_query_dataset = KaggleInputDataset('/SSD_Data01/PRCV-ReID5o/data/ORBench_PRCV/val/val_queries.json', begin_idx, end_idx, test_transforms)
             test_query_loader = DataLoader(test_query_dataset, batch_size=args.test_batch_size, shuffle=False)
             qfeats = embedding_qfeats(model, test_query_loader, current_query_type)
             qfeats = F.normalize(qfeats, p=2, dim=1)  # 归一化

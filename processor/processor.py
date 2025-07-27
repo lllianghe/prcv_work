@@ -194,15 +194,10 @@ def do_train(start_epoch, args, model, train_loader, evaluator, optimizer,
                 plot_and_save_curves(args.output_dir, len(train_loader), train_loss_list, mAP_list, lr_list, log_period, eval_iters_list, eval_epoch_list)
 
                 torch.cuda.empty_cache()
-                if best_r1 < r1:
-                    best_r1 = r1
-                    arguments["best_r1_epoch"] = epoch
-                    checkpointer.save("best_r1", **arguments)
                 if best_mAP < mAP:
                     best_mAP = mAP
                     arguments["best_mAP_epoch"] = epoch
-                    checkpointer.save("best_mAP", **arguments)
-                logger.info(f"best R1: {best_r1} at epoch {arguments['best_r1_epoch']}")
+                    checkpointer.save("best", **arguments)
                 logger.info(f"best mAP: {best_mAP} at epoch {arguments['best_mAP_epoch']}")
 
 

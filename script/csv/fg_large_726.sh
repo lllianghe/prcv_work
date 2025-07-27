@@ -1,0 +1,1 @@
+python get_kaggle_csv.py --config_file logs/ORBench/20250726_061959_large_fgclip/configs.yaml

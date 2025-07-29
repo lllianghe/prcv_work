@@ -150,7 +150,9 @@ def embedding_gfeats(test_gallery_loader, model):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description="irra Test")
     # 把对应model的file放这就行了
-    parser.add_argument("--config_file", default='logs/ORBench/20250713_134839_irra/configs.yaml') 
+    parser.add_argument("--config_file", default=
+                              '/SSD_Data01/myf/research/PRCV/fgclip_model/prcv_work/logs/ORBench/20250728_051944_large_fgclip/configs.yaml'
+                    ) 
     # parser.add_argument("--config_file", default='logs/ORBench/20250715_021439_irra/configs.yaml') #这是fgclip的模型
     args = parser.parse_args()
     args = load_train_configs(args.config_file)
@@ -175,7 +177,7 @@ if __name__ == '__main__':
     print(f"embedding_gfeats success")
     json_file = '/SSD_Data01/PRCV-ReID5o/data/ORBench_PRCV/val/val_queries.json'
     query_type_ranges = get_query_type_idx_range(json_file)
-    output_file='ranking_list.csv'
+    output_file=op.join(args.output_dir, 'ranking_list.csv')
     with open(output_file, mode='w', newline='') as csvfile:
         fieldnames = ['query_idx', 'query_type', 'ranking_list_idx']
         writer = csv.DictWriter(csvfile, fieldnames=fieldnames)

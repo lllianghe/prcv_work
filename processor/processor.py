@@ -49,7 +49,10 @@ def plot_and_save_curves(output_dir, num_iter_per_epoch, train_loss_list, mAP_li
 def do_train(start_epoch, args, model, train_loader, evaluator, optimizer,
              scheduler, checkpointer):
 
-    log_period = args.log_period
+    # log_period = args.log_period
+    log_period = len(train_loader)
+    scheduler_period = len(train_loader)
+
     eval_period = args.eval_period
     device = "cuda"
     num_epoch = args.num_epoch
@@ -84,7 +87,6 @@ def do_train(start_epoch, args, model, train_loader, evaluator, optimizer,
 
     tb_writer = SummaryWriter(log_dir=args.output_dir)
 
-    best_r1 = 0.0
     best_mAP = 0.0
 
     # Lists to store metrics for plotting
@@ -145,6 +147,7 @@ def do_train(start_epoch, args, model, train_loader, evaluator, optimizer,
 
             synchronize() # 分布式计算相关
 
+            
             if (n_iter + 1) % log_period == 0:
                 eval_count += 1
                 train_loss_list.append(meters['loss'].avg)
@@ -159,11 +162,11 @@ def do_train(start_epoch, args, model, train_loader, evaluator, optimizer,
                         info_str += f", {k}: {v.avg:.4f}"
                 info_str += f", Base Lr: {scheduler.get_lr()[0]:.2e}"
                 logger.info(info_str)
-
-            if (n_iter + 1) % args.scheduler_period == 0:
+            
+            if (n_iter + 1) % scheduler_period == 0:
                 scheduler.step(args.scheduler_period)
                 # print(f"Epoch {epoch}, Iteration {n_iter + 1}, Lr: {scheduler.get_lr()[0]:.2e}")
-
+            
         
         tb_writer.add_scalar('lr', scheduler.get_lr()[0], epoch)
         tb_writer.add_scalar('temperature', ret['temperature'], epoch)
@@ -171,8 +174,7 @@ def do_train(start_epoch, args, model, train_loader, evaluator, optimizer,
             if v.avg > 0:
                 tb_writer.add_scalar(k, v.avg, epoch)
 
-
-        scheduler.step()
+        # print speed
         if get_rank() == 0:
             end_time = time.time()
             time_per_batch = (end_time - start_time) / (n_iter + 1)
@@ -180,7 +182,9 @@ def do_train(start_epoch, args, model, train_loader, evaluator, optimizer,
                 "Epoch {} done. Time per batch: {:.3f}[s] Speed: {:.1f}[samples/s]"
                 .format(epoch, time_per_batch,
                         train_loader.batch_size / time_per_batch))
-        if epoch % eval_period == 0:
+
+        # evalue
+        if epoch % eval_period == 0 and args.test_size > 0:
             if get_rank() == 0:
                 logger.info("Validation Results - Epoch: {}".format(epoch))
 

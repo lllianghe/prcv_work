@@ -1,6 +1,7 @@
 import argparse
 
 
+
 def get_args():
     parser = argparse.ArgumentParser(description="IRRA Args")
     ######################## general settings ########################
@@ -72,7 +73,8 @@ def get_args():
     parser.add_argument("--test_batch_size", type=int, default=512)
     parser.add_argument("--num_workers", type=int, default=8)
     parser.add_argument("--test", dest='training', default=True, action='store_false') # 意思是如果有--test args.trainging就会被设置为true
-    parser.add_argument("--test_size",type=float,default=150/400)  # 测试集占总样本的比例
+    parser.add_argument("--test_size", type=float,default=150/400)  # 测试集占总样本的比例
+    parser.add_argument("--drop_last", type=bool, default=False)
 
     args = parser.parse_args()
 

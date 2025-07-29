@@ -1,3 +1,4 @@
+from torch.nn.modules.loss import _Loss
 from model import objectives
 from .clip_model import convert_weights
 import numpy as np
@@ -107,26 +108,24 @@ class IRRA(nn.Module):
 
     def forward(self, batch):
         ret = dict()
+
         if 'multi_modal_contrastive' in self.current_task: # 新增：多模态对比损失
             vis_images = batch['vis_images']
             cp_images = batch['cp_images']
             sk_images = batch['sk_images']
             nir_images = batch['nir_images']
             caption_ids = batch['caption_ids']
-            logit_scale = self.logit_scale
-            ret.update({'temperature': 1 / logit_scale})
-
             query_feats = {
                 'text': caption_ids,
                 'cp': cp_images,
                 'sk': sk_images,
                 'nir': nir_images
             }
+            logit_scale = self.logit_scale
+            ret.update({'temperature': 1 / logit_scale})
 
             if 'itc' in self.current_task:
-                multi_modal_contrastive_itc_loss = 0
-                print_mem = False
-                
+                multi_modal_contrastive_itc_loss = 0                
                 for modal_name, modal_data in query_feats.items(): # 遍历每个查询模态
                     # 1.encoder计算特征
                     vis_img_feats, _, _, _, _ = self.base_model(vis_images=vis_images)
@@ -135,7 +134,7 @@ class IRRA(nn.Module):
                     else:
                         i_feats = vis_img_feats[:,0,:].float()
 
-                    # 1.encoder计算特征
+                    # 2.encoder计算特征
                     if modal_name == 'text':
                         _, _, _, _, text_feats = self.base_model(text=modal_data)
                         if self.is_safetensors:
@@ -161,25 +160,13 @@ class IRRA(nn.Module):
                         else:
                             t_feats_modal = nir_img_feats[:,0,:].float()
                     
-                    # 打印当前显存使用情况
-                    if print_mem:
-                        allocated_memory = torch.cuda.memory_allocated() / (1024 ** 3)  # 转换为 GB
-                        cached_memory = torch.cuda.memory_reserved() / (1024 ** 3)  # 转换为 GB
-                        print(f"Forward start - Allocated memory: {allocated_memory:.2f} GB, Cached memory: {cached_memory:.2f} GB")
-
-                    # 2.计算loss, .backward计算梯度, 释放query计算图
-                    loss = objectives.compute_itc(i_feats, t_feats_modal, logit_scale) 
-                    ret.update({f'{modal_name}_itc_Loss': loss}) # detach后不带计算图, 大写L避免被计入总损失        
-
-                    # 打印当前显存使用情况
-                    if print_mem:
-                        allocated_memory = torch.cuda.memory_allocated() / (1024 ** 3)  # 转换为 GB
-                        cached_memory = torch.cuda.memory_reserved() / (1024 ** 3)  # 转换为 GB
-                        print(f"Forward start - Allocated memory: {allocated_memory:.2f} GB, Cached memory: {cached_memory:.2f} GB\n")
-
+                    # 3.计算loss, .backward计算梯度
+                    loss = objectives.compute_itc(i_feats, t_feats_modal, logit_scale) / len(query_feats)
+                    loss.backward()
+                    ret.update({f'{modal_name}_itc_Loss': loss.detach()}) # detach后不带计算图, 大写L避免被计入总损失        
                     multi_modal_contrastive_itc_loss += loss
-
-                ret.update({'multi_modal_contrastive_itc_loss': multi_modal_contrastive_itc_loss / len(query_feats)})
+                # multi_modal_contrastive_itc_loss.backward()
+                ret.update({'multi_modal_contrastive_itc_loss': multi_modal_contrastive_itc_loss.detach()})
 
             if 'sdm' in self.current_task:
                 multi_modal_contrastive_sdm_loss = 0
@@ -191,6 +178,7 @@ class IRRA(nn.Module):
                     else:
                         i_feats = vis_img_feats[:,0,:].float()
 
+                    # 2.encoder计算特征
                     if modal_name == 'text':
                         _, _, _, _, text_feats = self.base_model(text=modal_data)
                         if self.is_safetensors:
@@ -216,13 +204,13 @@ class IRRA(nn.Module):
                         else:
                             t_feats_modal = nir_img_feats[:,0,:].float()
 
-                    # 2.计算loss
-                    loss = objectives.compute_sdm(i_feats, t_feats_modal, batch['pids'], logit_scale) # 计算sdm损失, loss为scalar张量
-                    ret.update({f'{modal_name}_sdm_Loss': loss.detach()}) # 保存每个模态的loss, detach后不带计算图, 大写L避免被计入总损失
-                    # 3.backward计算梯度
-                    loss.backward() # 反向传播, 计算当前模态损失对模型参数的梯度
-                    multi_modal_contrastive_sdm_loss += loss.detach() # 累加loss的值, .detach()使其不带计算图, 避免在后续total_loss.backward()中重复计算梯度
-                ret.update({'multi_modal_contrastive_sdm_loss': multi_modal_contrastive_sdm_loss / len(query_feats)}) # 平均损失
+                    # 3.计算loss
+                    loss = objectives.compute_sdm(i_feats, t_feats_modal, batch['pids'], logit_scale) / len(query_feats)
+                    ret.update({f'{modal_name}_sdm_Loss': loss.detach()}) # .detach()后不带计算图, 大写L避免被计入总损失
+                    loss.backward()
+                    multi_modal_contrastive_sdm_loss += loss
+                    # multi_modal_contrastive_sdm_loss.backward()
+                ret.update({'multi_modal_contrastive_sdm_loss': multi_modal_contrastive_sdm_loss.detach()})
 
             # 如果需要计算后续损失, 则重新计算i_feats和t_feats以兼容id loss
             if any(task in self.current_task for task in ['id', 'mlm', 'cmpm']):

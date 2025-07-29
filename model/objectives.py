@@ -68,12 +68,6 @@ def compute_itc(image_features, text_features, logit_scale):
     loss_t = F.cross_entropy(logits_per_text, labels)
 
     loss = (loss_i +  loss_t)/2
-    loss.backward() # 不释放计算图
-    loss=loss.detach()
-
-    # --------------------------
-    # 反向释放（从最下游开始）
-    # --------------------------
 
     return loss
 

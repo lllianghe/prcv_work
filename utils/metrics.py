@@ -156,7 +156,12 @@ class Evaluator_OR():
 
         return qfeats_dict, gfeats, qids, gids
     
-    def eval(self, model, i2t_metric=False, modalities=["onemodal_SK", "onemodal_NIR", "onemodal_CP", "onemodal_TEXT", '' ,"twomodal_SK_Nir", "twomodal_SK_CP","twomodal_SK_TEXT", "twomodal_NIR_CP", "twomodal_NIR_TEXT", "twomodal_CP_TEXT", '', "threemodal_SK_NIR_CP", "threemodal_SK_NIR_TEXT", "threemodal_SK_CP_TEXT", "threemodal_NIR_CP_TEXT", '', "fourmodal_SK_TEXT_CP_NIR"]):
+    def eval(self, model, i2t_metric=False, modalities=["onemodal_SK", "onemodal_NIR", "onemodal_CP", "onemodal_TEXT", '' ,"twomodal_SK_NIR", "twomodal_SK_CP","twomodal_SK_TEXT", "twomodal_NIR_CP", "twomodal_NIR_TEXT", "twomodal_CP_TEXT", '', "threemodal_SK_NIR_CP", "threemodal_SK_NIR_TEXT", "threemodal_SK_CP_TEXT", "threemodal_NIR_CP_TEXT", '', "fourmodal_SK_TEXT_CP_NIR"]):
+        
+        if len(self.img_loader)==0:
+            print("No data! Skip Evaluating.\n")
+            return 0.0,0.0
+        
         # Step 1: Compute all embeddings once
         qfeats_dict, gfeats, qids, gids = self._compute_embedding(model)
         gfeats = F.normalize(gfeats, p=2, dim=1)  # image features (gallery)

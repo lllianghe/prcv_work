@@ -94,7 +94,7 @@ class LRSchedulerWithWarmup(_LRScheduler):
             raise NotImplementedError
         
         # 三段式退火
-        elif  self.last_epoch <= self.warmup_epochs + self.annealing_epochs:
+        elif  self.last_epoch < self.warmup_epochs + self.annealing_epochs:
             epoch_ratio = (self.last_epoch - self.warmup_epochs) / self.annealing_epochs
 
             if self.mode == "exp":

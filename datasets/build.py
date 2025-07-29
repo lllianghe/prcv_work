@@ -117,7 +117,8 @@ def build_dataloader(args, tranforms=None):
                                               dataset.train, args.batch_size,
                                               args.num_instance),
                                           num_workers=num_workers,
-                                          collate_fn=collate)
+                                          collate_fn=collate,
+                                          drop_last=args.drop_last)
         elif args.sampler == 'random': # 使用ramdom sampler
             # TODO add distributed condition
             logger.info('using random sampler')
@@ -126,7 +127,8 @@ def build_dataloader(args, tranforms=None):
                                       batch_size=args.batch_size,
                                       shuffle=True,
                                       num_workers=num_workers,
-                                      collate_fn=collate)
+                                      collate_fn=collate,
+                                          drop_last=args.drop_last)
             # collate将多个样本整理成一个批次
         else:
             logger.error('unsupported sampler! expected softmax or triplet but got {}'.format(args.sampler))

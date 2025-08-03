@@ -47,14 +47,13 @@ def plot_and_save_curves(output_dir, num_iter_per_epoch, train_loss_list, mAP_li
 
 
 def do_train(start_epoch, args, model, train_loader, evaluator, optimizer,
-             scheduler, checkpointer):
+             scheduler, checkpointer, train_data_sampler=None, device=None):
 
     # log_period = args.log_period
     log_period = len(train_loader)
     scheduler_period = len(train_loader)
 
     eval_period = args.eval_period
-    device = "cuda"
     num_epoch = args.num_epoch
     arguments = {}
     arguments["num_epoch"] = num_epoch
@@ -99,6 +98,7 @@ def do_train(start_epoch, args, model, train_loader, evaluator, optimizer,
 
     # train
     for epoch in range(start_epoch, num_epoch + 1):
+        train_data_sampler.set_epoch(epoch) if train_data_sampler else None
         start_time = time.time()
         for meter in meters.values():
             meter.reset()
@@ -145,10 +145,8 @@ def do_train(start_epoch, args, model, train_loader, evaluator, optimizer,
                 total_loss.backward()
             optimizer.step()
 
-            synchronize() # 分布式计算相关
-
             
-            if (n_iter + 1) % log_period == 0:
+            if (n_iter + 1) % log_period == 0 and get_rank() == 0:
                 eval_count += 1
                 train_loss_list.append(meters['loss'].avg)
                 lr_list.append(scheduler.get_lr()[0])
@@ -167,12 +165,12 @@ def do_train(start_epoch, args, model, train_loader, evaluator, optimizer,
                 scheduler.step(args.scheduler_period)
                 # print(f"Epoch {epoch}, Iteration {n_iter + 1}, Lr: {scheduler.get_lr()[0]:.2e}")
             
-        
-        tb_writer.add_scalar('lr', scheduler.get_lr()[0], epoch)
-        tb_writer.add_scalar('temperature', ret['temperature'], epoch)
-        for k, v in meters.items():
-            if v.avg > 0:
-                tb_writer.add_scalar(k, v.avg, epoch)
+        if get_rank() == 0:
+            tb_writer.add_scalar('lr', scheduler.get_lr()[0], epoch)
+            tb_writer.add_scalar('temperature', ret['temperature'], epoch)
+            for k, v in meters.items():
+                if v.avg > 0:
+                    tb_writer.add_scalar(k, v.avg, epoch)
 
         # print speed
         if get_rank() == 0:
@@ -203,6 +201,9 @@ def do_train(start_epoch, args, model, train_loader, evaluator, optimizer,
                     arguments["best_mAP_epoch"] = epoch
                     checkpointer.save("best", **arguments)
                 logger.info(f"best mAP: {best_mAP} at epoch {arguments['best_mAP_epoch']}")
+
+            if args.distributed:
+                synchronize()
 
 
 def do_inference(model, test_img_loader, test_txt_loader):

@@ -34,7 +34,7 @@ def read_image(img_path):
 def mkdir_if_missing(directory):
     if not osp.exists(directory):
         try:
-            os.makedirs(directory)
+            os.makedirs(directory, exist_ok=True)
         except OSError as e:
             if e.errno != errno.EEXIST:
                 raise
@@ -66,7 +66,7 @@ def get_text_embedding(path, length):
 
 def save_train_configs(path, args):
     if not os.path.exists(path):
-        os.makedirs(path)
+        os.makedirs(path, exist_ok=True)
     with open(f'{path}/configs.yaml', 'w') as f:
         yaml.dump(vars(args), f, default_flow_style=False)
 

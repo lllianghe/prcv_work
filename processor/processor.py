@@ -97,6 +97,10 @@ def do_train(start_epoch, args, model, train_loader, evaluator, optimizer,
     eval_epoch_list = []
     eval_count = 0
 
+    # 梯度累积相关变量（跨epoch累积）
+    gradient_accumulation_steps = args.gradient_accumulation_steps
+    accumulation_count = 0
+    
     # train
     for epoch in range(start_epoch, num_epoch + 1):
         start_time = time.time()
@@ -112,11 +116,16 @@ def do_train(start_epoch, args, model, train_loader, evaluator, optimizer,
             cached_memory = torch.cuda.memory_reserved(device) / (1024 ** 3)  # 转换为 GB
             # logger.info(f"Iteration {n_iter + 1}/{len(train_loader)} - Allocated memory: {allocated_memory:.2f} GB, Cached memory: {cached_memory:.2f} GB")
             
-            optimizer.zero_grad()
+            # 只在累积开始时清零梯度
+            if accumulation_count == 0:
+                optimizer.zero_grad()
 
             ret = model(batch)
 
             total_loss = sum([v for k, v in ret.items() if "loss" in k]) # 计算损失函数 multi_modal_contrastive_loss损失在模型中计算好了, 并且已经成功detach
+            
+            # 梯度累积：将损失除以累积步数
+            # total_loss = total_loss / gradient_accumulation_steps
 
             if args.dataset_name == 'ORBench':
                 batch_size = batch['vis_images'].shape[0]
@@ -143,7 +152,13 @@ def do_train(start_epoch, args, model, train_loader, evaluator, optimizer,
 
             if total_loss.requires_grad:
                 total_loss.backward()
-            optimizer.step()
+            
+            accumulation_count += 1
+            
+            # 只在累积步数达到时执行optimizer.step()
+            if accumulation_count >= gradient_accumulation_steps:
+                optimizer.step()
+                accumulation_count = 0
 
             synchronize() # 分布式计算相关
 
@@ -163,10 +178,13 @@ def do_train(start_epoch, args, model, train_loader, evaluator, optimizer,
                 info_str += f", Base Lr: {scheduler.get_lr()[0]:.2e}"
                 logger.info(info_str)
             
-            if (n_iter + 1) % scheduler_period == 0:
-                scheduler.step(args.scheduler_period)
+            # 只在实际执行optimizer.step()时调度学习率
+            if  (n_iter + 1) % (scheduler_period) == 0:
+                scheduler.step(scheduler_period          )# // gradient_accumulation_steps)
                 # print(f"Epoch {epoch}, Iteration {n_iter + 1}, Lr: {scheduler.get_lr()[0]:.2e}")
             
+        # 跨epoch累积模式：不在epoch结束时强制执行optimizer.step()
+        # accumulation_count 保持跨epoch状态
         
         tb_writer.add_scalar('lr', scheduler.get_lr()[0], epoch)
         tb_writer.add_scalar('temperature', ret['temperature'], epoch)

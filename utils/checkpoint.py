@@ -53,14 +53,14 @@ class Checkpointer:
         checkpoint = self._load_file(f)
         self._load_model(checkpoint)
 
-    def resume(self, f=None):
+    def resume(self, f=None, strict=True):
         if not f:
             # no checkpoint could be found
             self.logger.info("No checkpoint found.")
             raise IOError(f"No Checkpoint file found on {f}")
         self.logger.info("Loading checkpoint from {}".format(f))
         checkpoint = self._load_file(f)
-        self._load_model(checkpoint)
+        self._load_model(checkpoint, strict=strict)
         if "optimizer" in checkpoint and self.optimizer:
             self.logger.info("Loading optimizer from {}".format(f))
             self.optimizer.load_state_dict(checkpoint.pop("optimizer"))
@@ -73,8 +73,8 @@ class Checkpointer:
     def _load_file(self, f):
         return torch.load(f, map_location=torch.device("cpu"))
 
-    def _load_model(self, checkpoint, except_keys=None):
-        load_state_dict(self.model, checkpoint.pop("model"), except_keys)
+    def _load_model(self, checkpoint, except_keys=None, strict=True):
+        load_state_dict(self.model, checkpoint.pop("model"), except_keys, strict)
 
 
 def check_key(key, except_keys):
@@ -136,7 +136,7 @@ def strip_prefix_if_present(state_dict, prefix):
     return stripped_state_dict
 
 
-def load_state_dict(model, loaded_state_dict, except_keys=None):
+def load_state_dict(model, loaded_state_dict, except_keys=None, strict=True):
     model_state_dict = model.state_dict()
     # if the state_dict comes from a model that was wrapped in a
     # DataParallel or DistributedDataParallel during serialization,
@@ -145,4 +145,4 @@ def load_state_dict(model, loaded_state_dict, except_keys=None):
     align_and_update_state_dicts(model_state_dict, loaded_state_dict, except_keys)
 
     # use strict loading
-    model.load_state_dict(model_state_dict)
+    model.load_state_dict(model_state_dict, strict=strict)

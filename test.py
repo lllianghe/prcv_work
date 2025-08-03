@@ -31,8 +31,8 @@ if __name__ == '__main__':
     set_seed(42)
     parser = argparse.ArgumentParser(description="irra Test")
     parser.add_argument("--config_file", default=
-                                                                '/SSD_Data01/myf/research/PRCV/fgclip_model/prcv_work/logs/ORBench/test_fgclip/configs.yaml'
-                                                            )
+                  '/SSD_Data01/myf/research/PRCV/fgclip_model/prcv_work/logs/ORBench/20250730_072110_large_fgclip/configs.yaml'
+                        )
     # parser.add_argument("--config_file", default='logs/ORBench/20250715_021439_irra/configs.yaml') #这是fgclip的模型
     args = parser.parse_args()
     args = load_train_configs(args.config_file)

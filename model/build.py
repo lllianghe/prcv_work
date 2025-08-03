@@ -91,8 +91,8 @@ class IRRA(nn.Module):
         x = self.ln_post(x)
         return x
 
-    def encode_image(self, image):
-        x = self.base_model.encode_image(image)
+    def encode_image(self, image, modality=''):
+        x = self.base_model.encode_image(image, modality)
         if self.is_safetensors:
             return x.float()
         else:
@@ -127,40 +127,57 @@ class IRRA(nn.Module):
             if 'itc' in self.current_task:
                 multi_modal_contrastive_itc_loss = 0                
                 for modal_name, modal_data in query_feats.items(): # 遍历每个查询模态
-                    # 1.encoder计算特征
-                    vis_img_feats, _, _, _, _ = self.base_model(vis_images=vis_images)
-                    if self.is_safetensors:
-                        i_feats = vis_img_feats.float()
-                    else:
-                        i_feats = vis_img_feats[:,0,:].float()
 
-                    # 2.encoder计算特征
+                    # 1.encoder计算特征
                     if modal_name == 'text':
+                        vis_img_feats, _, _, _, _ = self.base_model(vis_images=vis_images)
+                        if self.is_safetensors:
+                            i_feats = vis_img_feats.float()
+                        else:
+                            i_feats = vis_img_feats[:,0,:].float()
                         _, _, _, _, text_feats = self.base_model(text=modal_data)
                         if self.is_safetensors:
                             t_feats_modal = text_feats.float()
                         else:
                             t_feats_modal = text_feats[torch.arange(text_feats.shape[0]), modal_data.argmax(dim=-1)].float()
+
                     elif modal_name == 'cp':
+                        _, vis_img_feats, _, _, _ = self.base_model(cp_images=vis_images)
+                        if self.is_safetensors:
+                            i_feats = vis_img_feats.float()
+                        else:
+                            i_feats = vis_img_feats[:,0,:].float()
                         _, cp_img_feats, _, _, _ = self.base_model(cp_images=modal_data)
                         if self.is_safetensors:
                             t_feats_modal = cp_img_feats.float()
                         else:
                             t_feats_modal = cp_img_feats[:,0,:].float()
+
                     elif modal_name == 'sk':
+                        _, _, vis_img_feats, _, _ = self.base_model(sk_images=vis_images)
+                        if self.is_safetensors:
+                            i_feats = vis_img_feats.float()
+                        else:
+                            i_feats = vis_img_feats[:,0,:].float()
                         _, _, sk_img_feats, _, _ = self.base_model(sk_images=modal_data)
                         if self.is_safetensors:
                             t_feats_modal = sk_img_feats.float()
                         else:
                             t_feats_modal = sk_img_feats[:,0,:].float()
+
                     elif modal_name == 'nir':
+                        _, _, _, vis_img_feats, _ = self.base_model(nir_images=vis_images)
+                        if self.is_safetensors:
+                            i_feats = vis_img_feats.float()
+                        else:
+                            i_feats = vis_img_feats[:,0,:].float()
                         _, _, _, nir_img_feats, _ = self.base_model(nir_images=modal_data)
                         if self.is_safetensors:
                             t_feats_modal = nir_img_feats.float()
                         else:
                             t_feats_modal = nir_img_feats[:,0,:].float()
                     
-                    # 3.计算loss, .backward计算梯度
+                    # 2.计算loss, .backward计算梯度
                     loss = objectives.compute_itc(i_feats, t_feats_modal, logit_scale) / len(query_feats)
                     loss.backward()
                     ret.update({f'{modal_name}_itc_Loss': loss.detach()}) # detach后不带计算图, 大写L避免被计入总损失        
@@ -171,40 +188,57 @@ class IRRA(nn.Module):
             if 'sdm' in self.current_task:
                 multi_modal_contrastive_sdm_loss = 0
                 for modal_name, modal_data in query_feats.items(): # 遍历每个查询模态
-                    # 1.encoder计算特征
-                    vis_img_feats, _, _, _, _ = self.base_model(vis_images=vis_images)
-                    if self.is_safetensors:
-                        i_feats = vis_img_feats.float()
-                    else:
-                        i_feats = vis_img_feats[:,0,:].float()
 
-                    # 2.encoder计算特征
+                    # 1.encoder计算特征
                     if modal_name == 'text':
+                        vis_img_feats, _, _, _, _ = self.base_model(vis_images=vis_images)
+                        if self.is_safetensors:
+                            i_feats = vis_img_feats.float()
+                        else:
+                            i_feats = vis_img_feats[:,0,:].float()
                         _, _, _, _, text_feats = self.base_model(text=modal_data)
                         if self.is_safetensors:
                             t_feats_modal = text_feats.float()
                         else:
                             t_feats_modal = text_feats[torch.arange(text_feats.shape[0]), modal_data.argmax(dim=-1)].float()
+
                     elif modal_name == 'cp':
+                        _, vis_img_feats, _, _, _ = self.base_model(cp_images=vis_images)
+                        if self.is_safetensors:
+                            i_feats = vis_img_feats.float()
+                        else:
+                            i_feats = vis_img_feats[:,0,:].float()
                         _, cp_img_feats, _, _, _ = self.base_model(cp_images=modal_data)
                         if self.is_safetensors:
                             t_feats_modal = cp_img_feats.float()
                         else:
                             t_feats_modal = cp_img_feats[:,0,:].float()
+
                     elif modal_name == 'sk':
+                        _, _, vis_img_feats, _, _ = self.base_model(sk_images=vis_images)
+                        if self.is_safetensors:
+                            i_feats = vis_img_feats.float()
+                        else:
+                            i_feats = vis_img_feats[:,0,:].float()
                         _, _, sk_img_feats, _, _ = self.base_model(sk_images=modal_data)
                         if self.is_safetensors:
                             t_feats_modal = sk_img_feats.float()
                         else:
                             t_feats_modal = sk_img_feats[:,0,:].float()
+
                     elif modal_name == 'nir':
+                        _, _, _, vis_img_feats, _ = self.base_model(nir_images=vis_images)
+                        if self.is_safetensors:
+                            i_feats = vis_img_feats.float()
+                        else:
+                            i_feats = vis_img_feats[:,0,:].float()
                         _, _, _, nir_img_feats, _ = self.base_model(nir_images=modal_data)
                         if self.is_safetensors:
                             t_feats_modal = nir_img_feats.float()
                         else:
                             t_feats_modal = nir_img_feats[:,0,:].float()
 
-                    # 3.计算loss
+                    # 2.计算loss
                     loss = objectives.compute_sdm(i_feats, t_feats_modal, batch['pids'], logit_scale) / len(query_feats)
                     ret.update({f'{modal_name}_sdm_Loss': loss.detach()}) # .detach()后不带计算图, 大写L避免被计入总损失
                     loss.backward()

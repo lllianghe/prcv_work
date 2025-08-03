@@ -14,7 +14,6 @@
 # limitations under the License.
 """ PyTorch CLIP model."""
 
-
 from dataclasses import dataclass
 from typing import Any, Optional, Tuple, Union
 
@@ -178,6 +177,7 @@ class CLIPVisionEmbeddings(nn.Module):
 
         self.class_embedding = nn.Parameter(torch.randn(self.embed_dim))
 
+        # 原始的patch_embedding层
         self.patch_embedding = nn.Conv2d(
             in_channels=config.num_channels,
             out_channels=self.embed_dim,
@@ -185,20 +185,61 @@ class CLIPVisionEmbeddings(nn.Module):
             stride=self.patch_size,
             bias=False,
         )
+        
+        # 用于存储不同模态的patch_embedding层的字典
+        self.modality_patch_embeddings = nn.ModuleDict()
 
         self.num_patches = (self.image_size // self.patch_size) ** 2
         self.num_positions = self.num_patches + 1
         self.position_embedding = nn.Embedding(self.num_positions, self.embed_dim)
         self.register_buffer("position_ids", torch.arange(self.num_positions).expand((1, -1)), persistent=False)
 
-    def forward(self, pixel_values: torch.FloatTensor,interpolate_pos_encoding = True) -> torch.Tensor:
+    def add_patch_embedding(self, modality: str):
+        """
+        为指定模态添加新的patch_embedding层，并深拷贝原始预训练权重
+        
+        Args:
+            modality (str): 模态名称，如 'vis', 'nir', 'cp', 'sk' 等
+        """
+        import copy
+        
+        if modality in self.modality_patch_embeddings:
+            print(f"Warning: Modality '{modality}' already exists. Skipping.")
+            return
+            
+        # 创建新的patch_embedding层并深拷贝原始权重
+        new_patch_embedding = nn.Conv2d(
+            in_channels=self.config.num_channels,
+            out_channels=self.embed_dim,
+            kernel_size=self.patch_size,
+            stride=self.patch_size,
+            bias=False,
+        )
+        
+        # 深拷贝原始patch_embedding的权重
+        with torch.no_grad():
+            new_patch_embedding.weight.copy_(self.patch_embedding.weight.clone())
+            
+        self.modality_patch_embeddings[modality] = new_patch_embedding
+        print(f"Added patch_embedding for modality: {modality}")
+
+    def forward(self, pixel_values: torch.FloatTensor, interpolate_pos_encoding=True, modality='') -> torch.Tensor:
 
         batch_size = pixel_values.shape[0]
         _, _, height, width = pixel_values.shape
 
+        # 根据modality选择对应的patch_embedding层
+        if modality and modality in self.modality_patch_embeddings:
+            patch_embedding_layer = self.modality_patch_embeddings[modality]
+            
+            # import torch
+            # print(torch.all(self.modality_patch_embeddings['vis'].weight==self.patch_embedding.weight),torch.all(self.modality_patch_embeddings['cp'].weight==self.patch_embedding.weight),torch.all(self.modality_patch_embeddings['nir'].weight==self.patch_embedding.weight),torch.all(self.modality_patch_embeddings['sk'].weight==self.patch_embedding.weight))
+            # print(f"{modality} embedding start\n")
+        else:
+            patch_embedding_layer = self.patch_embedding
 
-        target_dtype = self.patch_embedding.weight.dtype
-        patch_embeds = self.patch_embedding(pixel_values.to(dtype=target_dtype))  # shape = [*, width, grid, grid]
+        target_dtype = patch_embedding_layer.weight.dtype
+        patch_embeds = patch_embedding_layer(pixel_values.to(dtype=target_dtype))  # shape = [*, width, grid, grid]
         patch_embeds = patch_embeds.flatten(2).transpose(1, 2)
 
         class_embeds = self.class_embedding.expand(batch_size, 1, -1)
@@ -941,6 +982,7 @@ class CLIPVisionTransformer(nn.Module):
     def forward(
         self,
         pixel_values: Optional[torch.FloatTensor] = None,
+        modality = '',
         output_attentions: Optional[bool] = None,
         output_hidden_states: Optional[bool] = None,
         return_dict: Optional[bool] = None,
@@ -959,7 +1001,7 @@ class CLIPVisionTransformer(nn.Module):
         if pixel_values is None:
             raise ValueError("You have to specify pixel_values")
 
-        hidden_states = self.embeddings(pixel_values,interpolate_pos_encoding = interpolate_pos_encoding)
+        hidden_states = self.embeddings(pixel_values, interpolate_pos_encoding=interpolate_pos_encoding, modality=modality)
         hidden_states = self.pre_layrnorm(hidden_states)
 
         encoder_outputs = self.encoder(
@@ -1135,6 +1177,7 @@ class CLIPModel(CLIPPreTrainedModel):
         output_hidden_states: Optional[bool] = None,
         return_dict: Optional[bool] = None,
         interpolate_pos_encoding = False,
+        modality: str = '',
     ) -> torch.FloatTensor:
         r"""
         Returns:
@@ -1167,6 +1210,7 @@ class CLIPModel(CLIPPreTrainedModel):
 
         vision_outputs = self.vision_model(
             pixel_values=pixel_values,
+            modality=modality,
             output_attentions=output_attentions,
             output_hidden_states=output_hidden_states,
             return_dict=return_dict,

@@ -63,5 +63,6 @@ def build_lr_scheduler(args, optimizer):
         mode=args.lrscheduler,
         target_lr=args.target_lr,
         power=args.power,
+        step_size=args.step_size
         
     )

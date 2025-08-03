@@ -97,54 +97,63 @@ class GalleryDataset(Dataset):
         return len(self.img_files)
 
 def embedding_qfeats(model, query_loader,modalities):
-        model = model.eval()
-        device = next(model.parameters()).device
-
-        qids, gids, qfeats, gfeats = [], [], [], []
-        # text
-        modalities_list = modalities.split("_") 
-        for query_idx, query_type, cp_img, sk_img, nir_img, caption in query_loader:
-            with torch.no_grad():
-                feats = []
-                if 'TEXT' in modalities_list:
-                    caption = caption.to(device)
-                    text_feat = model.encode_text(caption)
-                    feats.append(text_feat)
-
-                if 'CP' in modalities_list:
-                    cp_img = cp_img.to(device)
-                    cp_feat = model.encode_image(cp_img)
-                    feats.append(cp_feat)
-
-                if 'SK' in modalities_list:
-                    sk_img = sk_img.to(device)
-                    sk_feat = model.encode_image(sk_img)
-                    feats.append(sk_feat)
-
-                if 'NIR' in modalities_list:
-                    nir_img = nir_img.to(device)
-                    nir_feat = model.encode_image(nir_img)
-                    feats.append(nir_feat)
-            img_feats = sum(feats) / len(feats) if feats else None  # 避免空列表除以0的错误
-            qfeats.append(img_feats)  
-        qfeats = torch.cat(qfeats, 0)
-        return qfeats
-
-def embedding_gfeats(test_gallery_loader, model):
     model = model.eval()
     device = next(model.parameters()).device
-    gfeats = []
+    modalities_list = modalities.split("_") 
+
+    qids, gids, qfeats, gfeats = [], [], [], []
+    for query_idx, query_type, cp_img, sk_img, nir_img, caption in query_loader:
+        with torch.no_grad():
+            feats = []
+            if 'TEXT' in modalities_list:
+                caption = caption.to(device)
+                text_feat = model.encode_text(caption)
+                feats.append(text_feat)
+
+            if 'CP' in modalities_list:
+                cp_img = cp_img.to(device)
+                cp_feat = model.encode_image(cp_img,'cp')
+                feats.append(cp_feat)
+
+            if 'SK' in modalities_list:
+                sk_img = sk_img.to(device)
+                sk_feat = model.encode_image(sk_img,'sk')
+                feats.append(sk_feat)
+
+            if 'NIR' in modalities_list:
+                nir_img = nir_img.to(device)
+                nir_feat = model.encode_image(nir_img,'nir')
+                feats.append(nir_feat)
+        img_feats = sum(feats) / len(feats) if feats else None  # 避免空列表除以0的错误
+        qfeats.append(img_feats)  
+    qfeats = torch.cat(qfeats, 0)
+    return qfeats
+
+def embedding_gfeats(model, test_gallery_loader):
+    model = model.eval()
+    device = next(model.parameters()).device
     
-    # 遍历gallery数据集
+    gfeats_dict = {'TEXT': [], 'CP': [], 'SK': [], 'NIR': []}
     for idx, img in test_gallery_loader:
         with torch.no_grad():
-            img = img.to(device)  # 将图像移到正确的设备
-            img_feat = model.encode_image(img)  # 获取图像特征
+                # TEXT
+                img = img.to(device)
+                text_feat = model.encode_image(img, modality='vis')
+                gfeats_dict['TEXT'].append(text_feat)
+                # CP
+                cp_feat = model.encode_image(img, modality='cp')
+                gfeats_dict['CP'].append(cp_feat)
+                # SK
+                sk_feat = model.encode_image(img, modality='sk')
+                gfeats_dict['SK'].append(sk_feat)
+                # NIR
+                nir_feat = model.encode_image(img, modality='nir')
+                gfeats_dict['NIR'].append(nir_feat)
+    for modality in gfeats_dict:
+        if gfeats_dict[modality] and len(gfeats_dict[modality]) > 0:
+                gfeats_dict[modality] = torch.cat(gfeats_dict[modality], 0)
+    return gfeats_dict
             
-        gfeats.append(img_feat)  # 将计算的特征添加到列表中
-
-    gfeats = torch.cat(gfeats, 0)  # 合并所有图像的特征
-    return gfeats
 
 
 if __name__ == '__main__':
@@ -172,8 +181,7 @@ if __name__ == '__main__':
     checkpointer.load(f=op.join(args.output_dir, 'best.pth'))
     model.to(device)
     
-    gfeats = embedding_gfeats(test_gallery_loader,model)
-    gfeats = F.normalize(gfeats, p=2, dim=1)
+    gfeats_dict = embedding_gfeats(model, test_gallery_loader)
     print(f"embedding_gfeats success")
     json_file = '/SSD_Data01/PRCV-ReID5o/data/ORBench_PRCV/val/val_queries.json'
     query_type_ranges = get_query_type_idx_range(json_file)
@@ -187,7 +195,14 @@ if __name__ == '__main__':
             test_query_dataset = KaggleInputDataset('/SSD_Data01/PRCV-ReID5o/data/ORBench_PRCV/val/val_queries.json', begin_idx, end_idx, test_transforms)
             test_query_loader = DataLoader(test_query_dataset, batch_size=args.test_batch_size, shuffle=False)
             qfeats = embedding_qfeats(model, test_query_loader, current_query_type)
+            modalities_list = current_query_type.split("_") 
+            gfeats_to_combine = [gfeats_dict[m] for m in modalities_list if m in gfeats_dict and len(gfeats_dict[m]) > 0]
+            if not gfeats_to_combine:
+                logger.warning(f"No features found for query type: {current_query_type}. Skipping.")
+                continue
+            gfeats = sum(gfeats_to_combine) / len(gfeats_to_combine)
             qfeats = F.normalize(qfeats, p=2, dim=1)  # 归一化
+            gfeats = F.normalize(gfeats, p=2, dim=1)
             similarity = qfeats @ gfeats.t()  # q * g
             indices = torch.argsort(similarity, dim=1, descending=True)  # 排序
             for i, query_idx in enumerate(range(begin_idx, end_idx + 1)):

@@ -19,6 +19,7 @@ class LRSchedulerWithWarmup(_LRScheduler):
         total_epochs=100,
         target_lr=0,
         power=0.9,
+        step_size=2000,
         last_epoch=-1,
     ):
         if not list(milestones) == sorted(milestones):
@@ -47,6 +48,7 @@ class LRSchedulerWithWarmup(_LRScheduler):
         self.power = power
         self.annealing_epochs=annealing_epochs
         self.min_lr=min_lr
+        self.step_size = step_size
         super().__init__(optimizer, last_epoch)
 
     def get_lr(self):
@@ -66,15 +68,15 @@ class LRSchedulerWithWarmup(_LRScheduler):
                 for base_lr in self.base_lrs
             ]
         
+        if self.mode == "exp":
+            return [base_lr * self.power ** ((self.last_epoch-self.warmup_epochs)/self.step_size) for base_lr in self.base_lrs]
+
         # 全程退火
         elif self.annealing_epochs <= self.warmup_epochs:
             epoch_ratio = (self.last_epoch - self.warmup_epochs) / (
                 self.total_epochs - self.warmup_epochs
             )
 
-            if self.mode == "exp":
-                factor = epoch_ratio
-                return [base_lr * self.power ** factor for base_lr in self.base_lrs]
             if self.mode == "linear":
                 factor = 1 - epoch_ratio
                 return [base_lr * factor for base_lr in self.base_lrs]

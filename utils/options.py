@@ -12,7 +12,11 @@ def get_args():
     parser.add_argument("--eval_period", type=float, default=1)
     parser.add_argument("--val_dataset",default="test") # use val set when evaluate, if test use test set
     parser.add_argument("--resume", default=False, action='store_true')
-    parser.add_argument("--resume_ckpt_file", default="", help='resume from ...')
+    parser.add_argument("--resume_ckpt_file", default="", help='resume from checkpoint file')
+    parser.add_argument('--add_multimodal_layers', action='store_true', default=False,
+                        help='Add multimodal layers when loading checkpoint. '
+                             'When True, loads single-modal checkpoint and automatically adds multimodal layers. '
+                             'When False, loads multimodal checkpoint in strict mode.')
 
     ######################## model general settings ########################
     parser.add_argument("--pretrain_choice", default='ViT-B/16') # whether use pretrained model
@@ -43,11 +47,12 @@ def get_args():
     parser.add_argument("--optimizer", type=str, default="Adam", help="[SGD, Adam, Adamw]")
     parser.add_argument("--lr", type=float, default=1e-5)
     parser.add_argument("--bias_lr_factor", type=float, default=2.)
-    parser.add_argument("--momentum", type=float, default=0.9)
-    parser.add_argument("--weight_decay", type=float, default=4e-5)
-    parser.add_argument("--weight_decay_bias", type=float, default=0.)
-    parser.add_argument("--alpha", type=float, default=0.9)
-    parser.add_argument("--beta", type=float, default=0.999)
+    parser.add_argument("--momentum", type=float, default=0.9) # SGD
+    parser.add_argument("--weight_decay", type=float, default=4e-5) # L2正则化
+    parser.add_argument("--weight_decay_bias", type=float, default=0.) # L2正则化
+    parser.add_argument("--alpha", type=float, default=0.9) # 一阶矩估计的指数衰减率
+    parser.add_argument("--beta", type=float, default=0.999) # 一阶矩估计的指数衰减率
+    parser.add_argument("--gradient_accumulation_steps", type=int, default=1, help="Number of steps to accumulate gradients before optimizer step")
     
     ######################## scheduler ########################
     parser.add_argument("--num_epoch", type=int, default=60)
@@ -62,6 +67,7 @@ def get_args():
     parser.add_argument("--lrscheduler", type=str, default="cosine")
     parser.add_argument("--target_lr", type=float, default=0)
     parser.add_argument("--power", type=float, default=0.9)
+    parser.add_argument("--step_size", type=int, default=2000)
 
     ######################## dataset ########################
     parser.add_argument("--dataset_name", default='ORBench', help="[CUHK-PEDES, ICFG-PEDES, RSTPReid, ORBench]")

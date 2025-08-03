@@ -119,15 +119,27 @@ def build_dataloader(args, tranforms=None):
                                           num_workers=num_workers,
                                           collate_fn=collate,
                                           drop_last=args.drop_last)
+
         elif args.sampler == 'random': # 使用ramdom sampler
             # TODO add distributed condition
             logger.info('using random sampler')
             # 每次训练时都会将数据随机打乱
-            train_loader = DataLoader(train_set,
-                                      batch_size=args.batch_size,
-                                      shuffle=True,
-                                      num_workers=num_workers,
-                                      collate_fn=collate,
+            if args.distributed:
+                train_data_sampler = DistributedSampler(train_set, shuffle=True)
+                train_loader = DataLoader(train_set,
+                                        batch_size=args.batch_size,
+                                        shuffle=(train_data_sampler is None),
+                                        sampler = train_data_sampler,
+                                        num_workers=num_workers,
+                                        collate_fn=collate,
+                                            drop_last=args.drop_last)
+            else:
+                train_data_sampler = None
+                train_loader = DataLoader(train_set,
+                                          batch_size=args.batch_size,
+                                          shuffle=True,
+                                          num_workers=num_workers,
+                                          collate_fn=collate,
                                           drop_last=args.drop_last)
             # collate将多个样本整理成一个批次
         else:
@@ -160,7 +172,7 @@ def build_dataloader(args, tranforms=None):
                                     shuffle=False,
                                     num_workers=num_workers)
         # print(len(train_loader), len(val_img_loader), len(val_txt_loader))
-        return train_loader, val_img_loader, val_txt_loader, num_classes
+        return train_loader, val_img_loader, val_txt_loader, num_classes, train_data_sampler
 
     else:
         # build dataloader for testing 

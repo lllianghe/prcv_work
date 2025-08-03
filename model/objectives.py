@@ -3,6 +3,8 @@ import torch.nn as nn
 import torch.nn.functional as F
 import gc # 回收
 
+from utils.comm import all_gather
+
 def compute_sdm(image_fetures, text_fetures, pid, logit_scale, image_id=None, factor=0.3, epsilon=1e-8):
     """
     Similarity Distribution Matching
@@ -52,6 +54,9 @@ def compute_itc(image_features, text_features, logit_scale):
     """
     image-text contrastive (ITC) loss, InfoNCE
     """
+    image_features = torch.cat(all_gather(image_features))
+    text_features = torch.cat(all_gather(text_features))
+
     batch_size = image_features.shape[0]
     # The device should be inferred from the input tensors.
     labels = torch.arange(start=0, end=batch_size, dtype=torch.int64, device=image_features.device)

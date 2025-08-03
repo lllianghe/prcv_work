@@ -1,9 +1,21 @@
 DATASET_NAME="ORBench"
 
-CUDA_VISIBLE_DEVICES=5 \
-python train.py \
---batch_size 12 \
---drop_last 1 \
+# 启用P2P并忽略警告
+export NCCL_IGNORE_DISABLED_P2P=1
+# 优化NCCL通信设置
+export NCCL_IB_DISABLE=1
+export NCCL_P2P_DISABLE=0
+export NCCL_SHM_DISABLE=0
+
+export NCCL_DEBUG=WARN
+# export NCCL_DEBUG_SUBSYS=ALL
+# export TORCH_DISTRIBUTED_DEBUG=DETAIL
+
+export CUDA_VISIBLE_DEVICES=6,7  # assign specific GPU
+NUM_GPUS=2
+torchrun --nproc_per_node=$NUM_GPUS --master_port=54198 \
+train.py \
+--batch_size 4 \
 --sampler random \
 --num_instance 5 \
 --loss_name 'multi_modal_contrastive+itc' \
@@ -20,9 +32,3 @@ python train.py \
 --img_aug \
 --MLM \
 --dataset_name $DATASET_NAME \
-
-
-
-# 按照epoch来调整log_period和scheduler_period
-# --log_period 20 \
-# --scheduler_period 20 \

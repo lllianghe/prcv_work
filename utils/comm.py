@@ -55,6 +55,11 @@ def all_gather(data):
     world_size = get_world_size()
     if world_size == 1:
         return [data]
+    
+    if isinstance(data, torch.Tensor):
+        original_device = data.device
+    else:
+        original_device = None
 
     # serialized to a Tensor
     buffer = pickle.dumps(data)
@@ -82,7 +87,11 @@ def all_gather(data):
     data_list = []
     for size, tensor in zip(size_list, tensor_list):
         buffer = tensor.cpu().numpy().tobytes()[:size]
-        data_list.append(pickle.loads(buffer))
+        obj = pickle.loads(buffer)
+        # 如果原始数据是张量且有设备信息，将其移动到原始设备
+        if original_device is not None and isinstance(obj, torch.Tensor):
+            obj = obj.to(original_device)
+        data_list.append(obj)
 
     return data_list
 

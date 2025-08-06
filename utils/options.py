@@ -1,4 +1,22 @@
 import argparse
+import torch
+
+def tuple_type(strings):
+    """Convert comma-separated string to tuple of integers"""
+    strings = strings.replace("(", "").replace(")", "")
+    mapped_int = map(int, strings.split(","))
+    return tuple(mapped_int)
+
+def dtype_type(dtype_str):
+    """Convert string to torch.dtype"""
+    if dtype_str == 'torch.float32' or dtype_str == 'float32':
+        return torch.float32
+    elif dtype_str == 'torch.float16' or dtype_str == 'float16':
+        return torch.float16
+    elif dtype_str == 'torch.bfloat16' or dtype_str == 'bfloat16':
+        return torch.bfloat16
+    else:
+        raise ValueError(f"Unsupported dtype: {dtype_str}")
 
 
 
@@ -6,6 +24,7 @@ def get_args():
     parser = argparse.ArgumentParser(description="IRRA Args")
     ######################## general settings ########################
     parser.add_argument("--local_rank", default=0, type=int)
+    parser.add_argument("--autocast_dtype", default=torch.float32, type=dtype_type, help="autocast dtype")
     parser.add_argument("--name", default="irra", help="experiment name to save")
     parser.add_argument("--output_dir", default="logs")
     parser.add_argument("--log_period", type=int, default=30)
@@ -36,7 +55,7 @@ def get_args():
     parser.add_argument("--id_loss_weight", type=float, default=1.0, help="id loss weight")
     
     ######################## vison trainsformer settings ########################
-    parser.add_argument("--img_size", type=tuple, default=(384, 128))
+    parser.add_argument("--img_size", type=tuple_type, default=(384, 128))
     parser.add_argument("--stride_size", type=int, default=16)
 
     ######################## text transformer settings ########################

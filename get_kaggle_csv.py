@@ -95,7 +95,6 @@ class GalleryDataset(Dataset):
 
     def __len__(self):
         return len(self.img_files)
-
 def embedding_qfeats(model, query_loader,modalities):
     model = model.eval()
     device = next(model.parameters()).device
@@ -130,6 +129,18 @@ def embedding_qfeats(model, query_loader,modalities):
     return qfeats
 
 def embedding_gfeats(model, test_gallery_loader):
+    model = model.eval()
+    device = next(model.parameters()).device
+    gfeats = []
+    for idx, img in test_gallery_loader:
+        with torch.no_grad():
+            img = img.to(device)
+            vis_feat = model.encode_image(img, modality='vis')
+            gfeats.append(vis_feat)
+    gfeats = torch.cat(gfeats, 0)
+    return gfeats
+
+def embedding_gfeats_with_multiembeddings(model, test_gallery_loader):
     model = model.eval()
     device = next(model.parameters()).device
     
@@ -181,8 +192,12 @@ if __name__ == '__main__':
     checkpointer.load(f=op.join(args.output_dir, 'best.pth'))
     model.to(device)
     
-    gfeats_dict = embedding_gfeats(model, test_gallery_loader)
-    print(f"embedding_gfeats success")
+    if args.add_multimodal_layers:
+        gfeats_dict = embedding_gfeats_with_multiembeddings(model, test_gallery_loader)
+        print(f"embedding_gfeats_with_multiembeddings success")
+    else:
+        gfeats = embedding_gfeats(model, test_gallery_loader)
+        print(f"embedding_gfeats success")
     json_file = '/SSD_Data01/PRCV-ReID5o/data/ORBench_PRCV/val/val_queries.json'
     query_type_ranges = get_query_type_idx_range(json_file)
     output_file=op.join(args.output_dir, 'ranking_list.csv')
@@ -196,11 +211,12 @@ if __name__ == '__main__':
             test_query_loader = DataLoader(test_query_dataset, batch_size=args.test_batch_size, shuffle=False)
             qfeats = embedding_qfeats(model, test_query_loader, current_query_type)
             modalities_list = current_query_type.split("_") 
-            gfeats_to_combine = [gfeats_dict[m] for m in modalities_list if m in gfeats_dict and len(gfeats_dict[m]) > 0]
-            if not gfeats_to_combine:
-                logger.warning(f"No features found for query type: {current_query_type}. Skipping.")
-                continue
-            gfeats = sum(gfeats_to_combine) / len(gfeats_to_combine)
+            if args.add_multimodal_layers:
+                gfeats_to_combine = [gfeats_dict[m] for m in modalities_list if m in gfeats_dict and len(gfeats_dict[m]) > 0]
+                if not gfeats_to_combine:
+                    logger.warning(f"No features found for query type: {current_query_type}. Skipping.")
+                    continue
+                gfeats = sum(gfeats_to_combine) / len(gfeats_to_combine)
             qfeats = F.normalize(qfeats, p=2, dim=1)  # 归一化
             gfeats = F.normalize(gfeats, p=2, dim=1)
             similarity = qfeats @ gfeats.t()  # q * g

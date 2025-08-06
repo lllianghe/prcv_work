@@ -9,6 +9,9 @@ from prettytable import PrettyTable
 import matplotlib.pyplot as plt
 import os
 
+from torch.amp import GradScaler
+
+
 def plot_and_save_curves(output_dir, num_iter_per_epoch, train_loss_list, mAP_list, lr_list, log_period, eval_iters_list=None, eval_epoch_list=None):
     plt.figure(figsize=(18, 5))
 
@@ -101,6 +104,12 @@ def do_train(start_epoch, args, model, train_loader, evaluator, optimizer,
     gradient_accumulation_steps = args.gradient_accumulation_steps
     accumulation_count = 0
     
+
+    # 根据精度类型决定是否使用scaler
+    autocast_dtype = args.autocast_dtype
+    use_scaler = autocast_dtype == torch.float16
+    scaler = GradScaler() if use_scaler else None
+
     # train
     for epoch in range(start_epoch, num_epoch + 1):
         start_time = time.time()
@@ -120,7 +129,7 @@ def do_train(start_epoch, args, model, train_loader, evaluator, optimizer,
             if accumulation_count == 0:
                 optimizer.zero_grad()
 
-            ret = model(batch)
+            ret = model(batch,scaler)
 
             total_loss = sum([v for k, v in ret.items() if "loss" in k]) # 计算损失函数 multi_modal_contrastive_loss损失在模型中计算好了, 并且已经成功detach
             
@@ -157,7 +166,11 @@ def do_train(start_epoch, args, model, train_loader, evaluator, optimizer,
             
             # 只在累积步数达到时执行optimizer.step()
             if accumulation_count >= gradient_accumulation_steps:
-                optimizer.step()
+                if use_scaler:
+                    scaler.step(optimizer)
+                    scaler.update()
+                else:
+                    optimizer.step()
                 accumulation_count = 0
 
             synchronize() # 分布式计算相关

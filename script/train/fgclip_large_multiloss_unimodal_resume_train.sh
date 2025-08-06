@@ -2,10 +2,10 @@
 
 # 配置参数
 DATASET_NAME="ORBench"  # 数据集名称
-CHECKPOINT_FILE="/SSD_Data01/myf/research/PRCV/fgclip_model/prcv_work/logs/ORBench/20250728_133505_large_fgclip/best.pth"   # 检查点文件路径
+CHECKPOINT_FILE="/SSD_Data01/myf/research/PRCV/fgclip_model/prcv_work/logs/ORBench/20250802_163940_large_fgclip/best.pth"  # 检查点文件路径
 ADD_MULTIMODAL_LAYERS=true    # 是否添加多模态层 (true=单模态检查点+自动添加多模态层, false=多模态检查点)
 
-CUDA_VISIBLE_DEVICES=5 \
+CUDA_VISIBLE_DEVICES=6 \
 python train.py \
 --batch_size 12 \
 --drop_last 1 \

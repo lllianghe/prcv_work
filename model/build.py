@@ -184,13 +184,14 @@ class IRRA(nn.Module):
                         
                         # 2.计算原始qg对比学习损失
                         qg_loss = objectives.compute_itc(i_feats, t_feats_modal, logit_scale) / len(query_feats)
-                        qg_loss = 0.5 * qg_loss
+                        # qg_loss = 0.8 * qg_loss
 
                     if self.autocast_dtype == torch.float16 and scaler is not None:
                         scaler.scale(qg_loss).backward()
                     else:
                         qg_loss.backward()
                     
+                    '''
                     # 跨模态对比学习：需要重新计算特征因为计算图已被清空
                     other_modals = [k for k in query_feats.keys() if k != modal_name]
                     if other_modals:
@@ -253,7 +254,7 @@ class IRRA(nn.Module):
                             
                             # 重新计算跨模态对比学习损失
                             cross_modal_loss = objectives.compute_itc(t_feats_modal_new, random_feats, logit_scale) / len(query_feats)
-                            cross_modal_loss = 0.5 * cross_modal_loss  # 给跨模态损失一个权重
+                            cross_modal_loss = 0.2 * cross_modal_loss  # 给跨模态损失一个权重
                         
                         # 在autocast外面进行跨模态损失的backward
                         if self.autocast_dtype == torch.float16 and scaler is not None:
@@ -263,9 +264,10 @@ class IRRA(nn.Module):
                         
                         # 更新合并损失用于记录
                         loss = qg_loss + cross_modal_loss
+                    '''
                     
-                    ret.update({f'{modal_name}_itc_Loss': loss.detach()}) # detach后不带计算图, 大写L避免被计入总损失        
-                    multi_modal_contrastive_itc_loss += loss
+                    ret.update({f'{modal_name}_itc_Loss': qg_loss.detach()}) # detach后不带计算图, 大写L避免被计入总损失        
+                    multi_modal_contrastive_itc_loss += qg_loss
                 # multi_modal_contrastive_itc_loss.backward()
                 ret.update({'multi_modal_contrastive_itc_loss': multi_modal_contrastive_itc_loss.detach()})
 

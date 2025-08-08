@@ -171,7 +171,7 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description="irra Test")
     # 把对应model的file放这就行了
     parser.add_argument("--config_file", default=
-                              '/SSD_Data01/myf/research/PRCV/fgclip_model/prcv_work/logs/ORBench/20250728_051944_large_fgclip/configs.yaml'
+                              'logs/ORBench/a800/configs.yaml'
                     ) 
     # parser.add_argument("--config_file", default='logs/ORBench/20250715_021439_irra/configs.yaml') #这是fgclip的模型
     args = parser.parse_args()
@@ -231,3 +231,22 @@ if __name__ == '__main__':
             print(f"{current_query_type} success")
     
     print("generate csv file success!")
+
+import wandb
+
+# 初始化 W&B 运行（如果尚未初始化）
+run_name = f'{time.strftime("%Y%m%d_%H%M%S", time.localtime())}_csv'
+wandb.init(project="prcv_wandb", name=run_name)
+
+
+# 创建一个 Artifact 并上传 CSV 文件
+artifact = wandb.Artifact(
+    name="ranking_results",  # Artifact 名称
+    type="results",         # 类型（自定义，如 dataset/model/results）
+    description="CSV file containing query ranking results"
+)
+artifact.add_file(op.join(args.output_dir, 'ranking_list.csv'))  # 添加本地文件
+
+# 上传到 W&B 云端
+wandb.log_artifact(artifact)
+print("CSV 文件已上传到 W&B Artifacts！")

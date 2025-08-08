@@ -171,7 +171,25 @@ def embedding_gfeats_with_multiembeddings(model, test_gallery_loader):
 if __name__ == '__main__':
     # 初始化 W&B 运行（如果尚未初始化）
     run_name = f'{time.strftime("%Y%m%d_%H%M%S", time.localtime())}_csv'
-    wandb.init(project="prcv_wandb", name=run_name)
+    # 确保使用脚本中指定的 wandb 配置
+    wandb_api_key = 'd53fab2389359528c14559bd90286e6c72876be0'
+    wandb_project = 'prcv_wandb'
+    wandb_entity = None # 可以在bash脚本中设置
+    
+    # 通过环境变量临时设置 API key，避免全局登录
+    # original_wandb_key = os.environ.get('WANDB_API_KEY')
+    os.environ['WANDB_API_KEY'] = wandb_api_key
+    
+    # 直接在 wandb.init() 中指定配置
+    wandb_config = {
+        'project': wandb_project,
+        'name': run_name
+    }
+    if wandb_entity:
+        wandb_config['entity'] = wandb_entity
+    
+    # 初始化 wandb，不需要显式登录
+    wandb.init(**wandb_config)
     parser = argparse.ArgumentParser(description="irra Test")
     # 把对应model的file放这就行了
     parser.add_argument("--config_file", default=

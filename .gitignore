@@ -12,3 +12,4 @@ my_note.txt
 .vscode
 # 临时脚本的文件夹
 myscript/
+wandb/

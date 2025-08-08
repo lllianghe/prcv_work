@@ -24,6 +24,7 @@ from utils.kaggle import get_query_type_idx_range
 from datasets.bases_or import tokenize
 import torch.nn.functional as F
 import csv
+import wandb
 
 class KaggleInputDataset(Dataset):
     def __init__(self, json_path,begin_idx,end_idx, transform):
@@ -168,6 +169,9 @@ def embedding_gfeats_with_multiembeddings(model, test_gallery_loader):
 
 
 if __name__ == '__main__':
+    # 初始化 W&B 运行（如果尚未初始化）
+    run_name = f'{time.strftime("%Y%m%d_%H%M%S", time.localtime())}_csv'
+    wandb.init(project="prcv_wandb", name=run_name)
     parser = argparse.ArgumentParser(description="irra Test")
     # 把对应model的file放这就行了
     parser.add_argument("--config_file", default=
@@ -231,13 +235,6 @@ if __name__ == '__main__':
             print(f"{current_query_type} success")
     
     print("generate csv file success!")
-
-import wandb
-
-# 初始化 W&B 运行（如果尚未初始化）
-run_name = f'{time.strftime("%Y%m%d_%H%M%S", time.localtime())}_csv'
-wandb.init(project="prcv_wandb", name=run_name)
-
 
 # 创建一个 Artifact 并上传 CSV 文件
 artifact = wandb.Artifact(

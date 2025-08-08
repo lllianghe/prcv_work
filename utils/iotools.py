@@ -67,8 +67,15 @@ def get_text_embedding(path, length):
 def save_train_configs(path, args):
     if not os.path.exists(path):
         os.makedirs(path)
+    
+    # Convert args to dict and handle torch.dtype serialization
+    args_dict = vars(args).copy()
+    for key, value in args_dict.items():
+        if hasattr(value, '__module__') and value.__module__ == 'torch':
+            args_dict[key] = str(value)
+    
     with open(f'{path}/configs.yaml', 'w') as f:
-        yaml.dump(vars(args), f, default_flow_style=False)
+        yaml.dump(args_dict, f, default_flow_style=False)
 
 def load_train_configs(path):
     with open(path, 'r') as f:

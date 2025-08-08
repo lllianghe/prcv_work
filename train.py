@@ -54,7 +54,10 @@ if __name__ == '__main__':
     train_loader, val_img_loader, val_txt_loader, num_classes = build_dataloader(args)
     model = build_model(args, num_classes) # num_classes是训练集中行人的身份数量
     logger.info('Total params: %2.fM' % (sum(p.numel() for p in model.parameters()) / 1000000.0))
+    
+    
     model.to(device)
+    
 
     if args.distributed:
         model = torch.nn.parallel.DistributedDataParallel(
@@ -64,18 +67,63 @@ if __name__ == '__main__':
             # this should be removed if we update BatchNorm stats
             broadcast_buffers=False,
         )
+    
     optimizer = build_optimizer(args, model)
     scheduler = build_lr_scheduler(args, optimizer)
 
     is_master = get_rank() == 0 #分布式的获取进程排名 如不开启分布式训练 则定义为0
     checkpointer = Checkpointer(model, optimizer, scheduler, args.output_dir, is_master) #负责模型加载保存
+    
+
+    start_epoch = 1
+    # 统一的检查点加载逻辑
+    if args.resume:
+        logger.info(f"Loading checkpoint from {args.resume_ckpt_file}")
+        if not args.add_multimodal_layers:
+            # 严格模式：用于多模态检查点
+            checkpoint = checkpointer.resume(args.resume_ckpt_file, strict=True)
+            logger.info("Using strict loading mode for multimodal checkpoint")
+            
+            # 严格模式下恢复epoch信息
+            if 'epoch' in checkpoint:
+                start_epoch = checkpoint['epoch']+1
+                logger.info(f"Resuming from epoch {start_epoch}")
+        else:
+            # 非严格模式：用于单模态检查点，自动添加多模态层
+            checkpoint = checkpointer.resume(args.resume_ckpt_file, strict=False)
+            logger.info("Using non-strict loading mode for single-modal checkpoint")
+
+            # 优化器调度器重置
+            logger.info("Resetting optimizer and scheduler to use new script parameters")
+            # 重新构建优化器和调度器，忽略checkpoint中的状态
+            optimizer = build_optimizer(args, model)
+            scheduler = build_lr_scheduler(args, optimizer)
+            # 重新创建checkpointer以使用新的优化器和调度器
+            checkpointer = Checkpointer(model, optimizer, scheduler, args.output_dir, is_master)
+            # 重置训练起始epoch为1，忽略checkpoint中的epoch信息
+            logger.info("Optimizer, scheduler have been reset to use new parameters")
+            
+            # 自动添加多模态embedding层
+            if hasattr(model.base_model, 'vision_model'):
+                logger.info("Automatically adding multimodal embedding layers for single-modal checkpoint")
+                modalities = ['vis', 'sk', 'nir', 'cp']
+                for modality in modalities:
+                    model.base_model.vision_model.embeddings.add_patch_embedding(modality)
+                model.base_model.vision_model.embeddings.patch_embedding.weight.requires_grad = False
+                model.to(device)
+    else:
+        logger.info("Start training without loading checkpoint")
+        if args.add_multimodal_layers:
+            logger.info("Manually adding multimodal embedding layers")
+            modalities = ['vis', 'sk', 'nir', 'cp']
+            for modality in modalities:
+                model.base_model.vision_model.embeddings.add_patch_embedding(modality)
+            model.base_model.vision_model.embeddings.patch_embedding.weight.requires_grad = False
+            model.to(device)
+
     if args.dataset_name == 'ORBench':
         evaluator = Evaluator_OR(val_img_loader, val_txt_loader) # 用于评估检索性能的类
     else:
         evaluator = Evaluator(val_img_loader, val_txt_loader)
-    start_epoch = 1
-    if args.resume:  # 可以在断点处开始训练
-        checkpoint = checkpointer.resume(args.resume_ckpt_file)
-        start_epoch = checkpoint['epoch']
     
     do_train(start_epoch, args, model, train_loader, evaluator, optimizer, scheduler, checkpointer)

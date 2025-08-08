@@ -114,8 +114,8 @@ class Evaluator_OR():
         device = next(model.parameters()).device
 
         qids, gids = [], []
-        gfeats = []
         # A dictionary to store features for each modality
+        gfeats_dict = {'TEXT': [], 'CP': [], 'SK': [], 'NIR': []}
         qfeats_dict = {'TEXT': [], 'CP': [], 'SK': [], 'NIR': []}
 
         # text/query loader
@@ -128,15 +128,15 @@ class Evaluator_OR():
                 qfeats_dict['TEXT'].append(text_feat)
                 # CP
                 cp_img = cp_img.to(device)
-                cp_feat = model.encode_image(cp_img)
+                cp_feat = model.encode_image(cp_img, modality='cp')
                 qfeats_dict['CP'].append(cp_feat)
                 # SK
                 sk_img = sk_img.to(device)
-                sk_feat = model.encode_image(sk_img)
+                sk_feat = model.encode_image(sk_img, modality='sk')
                 qfeats_dict['SK'].append(sk_feat)
                 # NIR
                 nir_img = nir_img.to(device)
-                nir_feat = model.encode_image(nir_img)
+                nir_feat = model.encode_image(nir_img, modality='nir')
                 qfeats_dict['NIR'].append(nir_feat)
 
         qids = torch.cat(qids, 0)
@@ -146,15 +146,27 @@ class Evaluator_OR():
 
         # image/gallery loader
         for pid, img in self.img_loader:
-            img = img.to(device)
-            with torch.no_grad():
-                img_feat = model.encode_image(img)
             gids.append(pid.view(-1))
-            gfeats.append(img_feat)
+            with torch.no_grad():
+                # TEXT
+                img = img.to(device)
+                text_feat = model.encode_image(img, modality='vis')
+                gfeats_dict['TEXT'].append(text_feat)
+                # CP
+                cp_feat = model.encode_image(img, modality='cp')
+                gfeats_dict['CP'].append(cp_feat)
+                # SK
+                sk_feat = model.encode_image(img, modality='sk')
+                gfeats_dict['SK'].append(sk_feat)
+                # NIR
+                nir_feat = model.encode_image(img, modality='nir')
+                gfeats_dict['NIR'].append(nir_feat)
         gids = torch.cat(gids, 0)
-        gfeats = torch.cat(gfeats, 0)
+        for modality in gfeats_dict:
+            if gfeats_dict[modality] and len(gfeats_dict[modality]) > 0:
+                 gfeats_dict[modality] = torch.cat(gfeats_dict[modality], 0)
 
-        return qfeats_dict, gfeats, qids, gids
+        return qfeats_dict, gfeats_dict, qids, gids
     
     def eval(self, model, i2t_metric=False, modalities=["onemodal_SK", "onemodal_NIR", "onemodal_CP", "onemodal_TEXT", '' ,"twomodal_SK_NIR", "twomodal_SK_CP","twomodal_SK_TEXT", "twomodal_NIR_CP", "twomodal_NIR_TEXT", "twomodal_CP_TEXT", '', "threemodal_SK_NIR_CP", "threemodal_SK_NIR_TEXT", "threemodal_SK_CP_TEXT", "threemodal_NIR_CP_TEXT", '', "fourmodal_SK_TEXT_CP_NIR"]):
         
@@ -163,8 +175,7 @@ class Evaluator_OR():
             return 0.0,0.0
         
         # Step 1: Compute all embeddings once
-        qfeats_dict, gfeats, qids, gids = self._compute_embedding(model)
-        gfeats = F.normalize(gfeats, p=2, dim=1)  # image features (gallery)
+        qfeats_dict, gfeats_dict, qids, gids = self._compute_embedding(model)
 
         all_r1s = []
         all_mAPs = []
@@ -183,9 +194,16 @@ class Evaluator_OR():
             if not feats_to_combine:
                 self.logger.warning(f"No features found for modality strategy: {modality_strategy}. Skipping.")
                 continue
-            
             qfeats = sum(feats_to_combine) / len(feats_to_combine)
+            
+            gfeats_to_combine = [gfeats_dict[m] for m in modalities_list if m in gfeats_dict and len(gfeats_dict[m]) > 0]
+            if not gfeats_to_combine:
+                self.logger.warning(f"No features found for modality strategy: {modality_strategy}. Skipping.")
+                continue
+            gfeats = sum(gfeats_to_combine) / len(gfeats_to_combine)
+
             qfeats = F.normalize(qfeats, p=2, dim=1)  # text features (query)
+            gfeats = F.normalize(gfeats, p=2, dim=1)  # image features (gallery)
 
             # Calculate similarity
             similarity = qfeats @ gfeats.t()

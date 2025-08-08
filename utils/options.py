@@ -1,4 +1,22 @@
 import argparse
+import torch
+
+def tuple_type(strings):
+    """Convert comma-separated string to tuple of integers"""
+    strings = strings.replace("(", "").replace(")", "")
+    mapped_int = map(int, strings.split(","))
+    return tuple(mapped_int)
+
+def dtype_type(dtype_str):
+    """Convert string to torch.dtype"""
+    if dtype_str == 'torch.float32' or dtype_str == 'float32':
+        return torch.float32
+    elif dtype_str == 'torch.float16' or dtype_str == 'float16':
+        return torch.float16
+    elif dtype_str == 'torch.bfloat16' or dtype_str == 'bfloat16':
+        return torch.bfloat16
+    else:
+        raise ValueError(f"Unsupported dtype: {dtype_str}")
 
 
 
@@ -6,13 +24,18 @@ def get_args():
     parser = argparse.ArgumentParser(description="IRRA Args")
     ######################## general settings ########################
     parser.add_argument("--local_rank", default=0, type=int)
+    parser.add_argument("--autocast_dtype", default=torch.float32, type=dtype_type, help="autocast dtype")
     parser.add_argument("--name", default="irra", help="experiment name to save")
     parser.add_argument("--output_dir", default="logs")
     parser.add_argument("--log_period", type=int, default=30)
     parser.add_argument("--eval_period", type=float, default=1)
     parser.add_argument("--val_dataset",default="test") # use val set when evaluate, if test use test set
     parser.add_argument("--resume", default=False, action='store_true')
-    parser.add_argument("--resume_ckpt_file", default="", help='resume from ...')
+    parser.add_argument("--resume_ckpt_file", default="", help='resume from checkpoint file')
+    parser.add_argument('--add_multimodal_layers', action='store_true', default=False,
+                        help='Add multimodal layers when loading checkpoint. '
+                             'When True, loads single-modal checkpoint and automatically adds multimodal layers. '
+                             'When False, loads multimodal checkpoint in strict mode.')
 
     ######################## model general settings ########################
     parser.add_argument("--pretrain_choice", default='ViT-B/16') # whether use pretrained model
@@ -32,7 +55,7 @@ def get_args():
     parser.add_argument("--id_loss_weight", type=float, default=1.0, help="id loss weight")
     
     ######################## vison trainsformer settings ########################
-    parser.add_argument("--img_size", type=tuple, default=(384, 128))
+    parser.add_argument("--img_size", type=tuple_type, default=(384, 128))
     parser.add_argument("--stride_size", type=int, default=16)
 
     ######################## text transformer settings ########################
@@ -43,11 +66,12 @@ def get_args():
     parser.add_argument("--optimizer", type=str, default="Adam", help="[SGD, Adam, Adamw]")
     parser.add_argument("--lr", type=float, default=1e-5)
     parser.add_argument("--bias_lr_factor", type=float, default=2.)
-    parser.add_argument("--momentum", type=float, default=0.9)
-    parser.add_argument("--weight_decay", type=float, default=4e-5)
-    parser.add_argument("--weight_decay_bias", type=float, default=0.)
-    parser.add_argument("--alpha", type=float, default=0.9)
-    parser.add_argument("--beta", type=float, default=0.999)
+    parser.add_argument("--momentum", type=float, default=0.9) # SGD
+    parser.add_argument("--weight_decay", type=float, default=4e-5) # L2正则化
+    parser.add_argument("--weight_decay_bias", type=float, default=0.) # L2正则化
+    parser.add_argument("--alpha", type=float, default=0.9) # 一阶矩估计的指数衰减率
+    parser.add_argument("--beta", type=float, default=0.999) # 一阶矩估计的指数衰减率
+    parser.add_argument("--gradient_accumulation_steps", type=int, default=1, help="Number of steps to accumulate gradients before optimizer step")
     
     ######################## scheduler ########################
     parser.add_argument("--num_epoch", type=int, default=60)
@@ -62,6 +86,7 @@ def get_args():
     parser.add_argument("--lrscheduler", type=str, default="cosine")
     parser.add_argument("--target_lr", type=float, default=0)
     parser.add_argument("--power", type=float, default=0.9)
+    parser.add_argument("--step_size", type=int, default=2000)
 
     ######################## dataset ########################
     parser.add_argument("--dataset_name", default='ORBench', help="[CUHK-PEDES, ICFG-PEDES, RSTPReid, ORBench]")

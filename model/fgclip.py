@@ -128,6 +128,7 @@ class FGCLIPModel(CLIPModel):
     def get_image_features(
         self,
         pixel_values: Optional[torch.FloatTensor] = None,
+        modality = '',
         output_attentions: Optional[bool] = None,
         output_hidden_states: Optional[bool] = None,
         return_dict: Optional[bool] = None,
@@ -142,6 +143,7 @@ class FGCLIPModel(CLIPModel):
 
         vision_outputs = self.vision_model(
             pixel_values=pixel_values,
+            modality = modality,
             output_attentions=output_attentions,
             output_hidden_states=output_hidden_states,
             return_dict=return_dict,
@@ -308,10 +310,10 @@ class FGCLIPModel(CLIPModel):
 
 
     def forward(self, vis_images=None, cp_images=None, sk_images=None, nir_images=None, text=None):
-        vis_img_feats = self.encode_image(vis_images) if vis_images is not None else None
-        cp_img_feats = self.encode_image(cp_images) if cp_images is not None else None
-        sk_img_feats = self.encode_image(sk_images) if sk_images is not None else None
-        nir_img_feats = self.encode_image(nir_images) if nir_images is not None else None
+        vis_img_feats = self.encode_image(vis_images, modality = 'vis') if vis_images is not None else None # 小写
+        cp_img_feats = self.encode_image(cp_images, modality = 'cp') if cp_images is not None else None
+        sk_img_feats = self.encode_image(sk_images, modality = 'sk') if sk_images is not None else None
+        nir_img_feats = self.encode_image(nir_images, modality = 'nir') if nir_images is not None else None
         text_feats = self.encode_text(text) if text is not None else None
         return vis_img_feats, cp_img_feats, sk_img_feats, nir_img_feats, text_feats
     

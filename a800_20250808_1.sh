@@ -33,7 +33,7 @@ export https_proxy=http://100.68.170.107:3128
 echo "$(date): 开始训练"
 CUDA_VISIBLE_DEVICES=0 \
 python train.py \
---batch_size 32 \
+--batch_size 24 \
 --drop_last 1 \
 --loss_name 'multi_modal_contrastive+itc' \
 --sampler random \
@@ -51,6 +51,7 @@ python train.py \
 --add_multimodal_layers \
 --lrscheduler exp \
 --step_size 2000 \
+--autocast_dtype bfloat16 \
 --power 0.5 || { echo "训练失败"; exit 1; }
 echo "$(date): 模型训练运行完成"
 

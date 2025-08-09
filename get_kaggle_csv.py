@@ -265,3 +265,4 @@ artifact.add_file(output_file)  # 添加本地文件
 # 上传到 W&B 云端
 wandb.log_artifact(artifact)
 print("CSV 文件已上传到 W&B Artifacts！")
+wandb.finish()

@@ -60,7 +60,7 @@ class KaggleInputDataset(Dataset):
                 cp_image_path = content[i]
             elif modal == 'SK' and i < len(content):
                 sk_image_path = content[i]
-        folder_path = '/SSD_Data01/PRCV-ReID5o/data/ORBench_PRCV/val' 
+        folder_path = '/fs-computility/ai-shen/macaoyuan.p/hzc/PRCV/ORBench_PRCV/val' 
         nir_image = read_image(os.path.join(folder_path, nir_image_path)) if nir_image_path else None
         cp_image = read_image(os.path.join(folder_path, cp_image_path)) if cp_image_path else None
         sk_image = read_image(os.path.join(folder_path, sk_image_path)) if sk_image_path else None
@@ -203,10 +203,10 @@ if __name__ == '__main__':
     logger = setup_logger('IRRA', save_dir=args.output_dir, if_train=args.training)
     logger.info(args)
     device = "cuda"
-    json_file = '/SSD_Data01/PRCV-ReID5o/data/ORBench_PRCV/val/val_queries.json'
+    json_file = '/fs-computility/ai-shen/macaoyuan.p/hzc/PRCV/ORBench_PRCV/val/val_queries.json'
     query_type_ranges = get_query_type_idx_range(json_file)
     test_transforms = build_transforms(img_size=args.img_size,is_train=False)
-    test_gallery_dataset = GalleryDataset('/SSD_Data01/PRCV-ReID5o/data/ORBench_PRCV/val/gallery',transform=test_transforms)
+    test_gallery_dataset = GalleryDataset('/fs-computility/ai-shen/macaoyuan.p/hzc/PRCV/ORBench_PRCV/val/gallery',transform=test_transforms)
     test_gallery_loader = DataLoader(test_gallery_dataset, batch_size=args.test_batch_size, shuffle=False)
     
     model = build_model(args,num_classes=int(400*(1-args.test_size))) #num_class必须和之前构建的model中的num_class对应
@@ -220,7 +220,7 @@ if __name__ == '__main__':
     else:
         gfeats = embedding_gfeats(model, test_gallery_loader)
         print(f"embedding_gfeats success")
-    json_file = '/SSD_Data01/PRCV-ReID5o/data/ORBench_PRCV/val/val_queries.json'
+    json_file = '/fs-computility/ai-shen/macaoyuan.p/hzc/PRCV/ORBench_PRCV/val/val_queries.json'
     query_type_ranges = get_query_type_idx_range(json_file)
     output_file=op.join(args.output_dir, 'ranking_list.csv')
     with open(output_file, mode='w', newline='') as csvfile:
@@ -229,7 +229,7 @@ if __name__ == '__main__':
         writer.writeheader()
         
         for current_query_type, begin_idx, end_idx in query_type_ranges:
-            test_query_dataset = KaggleInputDataset('/SSD_Data01/PRCV-ReID5o/data/ORBench_PRCV/val/val_queries.json', begin_idx, end_idx, test_transforms)
+            test_query_dataset = KaggleInputDataset('/fs-computility/ai-shen/macaoyuan.p/hzc/PRCV/ORBench_PRCV/val/val_queries.json', begin_idx, end_idx, test_transforms)
             test_query_loader = DataLoader(test_query_dataset, batch_size=args.test_batch_size, shuffle=False)
             qfeats = embedding_qfeats(model, test_query_loader, current_query_type)
             modalities_list = current_query_type.split("_") 
@@ -251,7 +251,7 @@ if __name__ == '__main__':
                     'ranking_list_idx': ranking_list_idx
                 })
             print(f"{current_query_type} success")
-    
+            wandb.log({"message": f"{current_query_type} success"})
     print("generate csv file success!")
 
 # 创建一个 Artifact 并上传 CSV 文件
@@ -260,7 +260,7 @@ artifact = wandb.Artifact(
     type="results",         # 类型（自定义，如 dataset/model/results）
     description="CSV file containing query ranking results"
 )
-artifact.add_file(op.join(args.output_dir, 'ranking_list.csv'))  # 添加本地文件
+artifact.add_file(output_file)  # 添加本地文件
 
 # 上传到 W&B 云端
 wandb.log_artifact(artifact)

@@ -242,4 +242,11 @@ class Evaluator_OR():
         table.hrules = 1
         self.logger.info('\n' + str(table))
         
-        return avg_r1, avg_mAP
+        # 提取四种单模态的mAP
+        single_modal_mAPs = {}
+        for row in result_rows:
+            if len(row) > 0 and row[0].startswith('onemodal_'):
+                modal_name = row[0].split('_')[1]  # 提取模态名称
+                single_modal_mAPs[modal_name] = row[4]  # mAP值在第5列（索引4）
+        
+        return avg_r1, avg_mAP, single_modal_mAPs

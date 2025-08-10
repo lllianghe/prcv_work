@@ -12,40 +12,116 @@ import os
 from torch.amp import GradScaler
 
 
-def plot_and_save_curves(output_dir, num_iter_per_epoch, train_loss_list, mAP_list, lr_list, log_period, eval_iters_list=None, eval_epoch_list=None):
-    plt.figure(figsize=(18, 5))
-
-    # Plotting Training Loss
-    plt.subplot(1, 3, 1)
-    plt.plot(eval_iters_list, train_loss_list, label='Train Loss')
+def plot_and_save_curves(output_dir, num_iter_per_epoch, train_loss_list, mAP_list, lr_list, log_period, eval_iters_list=None, eval_epoch_list=None, loss_dict=None, single_modal_mAPs_history=None):
+    # 绘制损失曲线图
+    plt.figure(figsize=(20, 10))
+    
+    # 第一行：损失曲线
+    plt.subplot(2, 2, 1)
+    if len(train_loss_list) > 0 and len(eval_iters_list) > 0:
+        # Convert CUDA tensors to CPU if needed
+        train_loss_values = train_loss_list
+        if len(train_loss_values) > 0 and hasattr(train_loss_values[0], 'cpu'):
+            train_loss_values = [val.cpu().item() if hasattr(val, 'cpu') else val for val in train_loss_values]
+        plt.plot(eval_iters_list, train_loss_values, label='Total Loss', linewidth=2)
+    if loss_dict:
+        for loss_name, loss_values in loss_dict.items():
+            if len(loss_values) > 0 and len(eval_iters_list) >= len(loss_values) and max(loss_values) > 0:
+                x_values = eval_iters_list[-len(loss_values):] if len(loss_values) <= len(eval_iters_list) else eval_iters_list
+                y_values = loss_values[-len(x_values):] if len(loss_values) > len(x_values) else loss_values
+                # Convert CUDA tensors to CPU if needed
+                if hasattr(y_values[0], 'cpu'):
+                    y_values = [val.cpu().item() if hasattr(val, 'cpu') else val for val in y_values]
+                plt.plot(x_values, y_values, label=loss_name, alpha=0.7)
     plt.xlabel(f'x{log_period} Steps ({num_iter_per_epoch} per epoch)')
     plt.ylabel('Loss')
-    plt.legend()
-    plt.title('Training Loss Curve')
+    plt.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
+    plt.title('All Training Loss Curves')
     plt.grid(True)
-
-    # Plotting mAP Score
-    plt.subplot(1, 3, 2)
-    if eval_epoch_list:
-        plt.plot(eval_epoch_list, mAP_list, label='mAP', marker='o')
-    plt.xlabel('Eval-Epoch')
-    plt.ylabel('mAP Score')
-    plt.legend()
-    plt.title('mAP Curve')
-    plt.grid(True)
-
-    # Plotting Learning Rate
-    plt.subplot(1, 3, 3)
-    plt.plot(eval_iters_list, lr_list, label='Learning Rate')
+    
+    # 第一行：学习率曲线
+    plt.subplot(2, 2, 2)
+    if len(lr_list) > 0 and len(eval_iters_list) > 0:
+        # Convert CUDA tensors to CPU if needed
+        lr_values = lr_list
+        if len(lr_values) > 0 and hasattr(lr_values[0], 'cpu'):
+            lr_values = [val.cpu().item() if hasattr(val, 'cpu') else val for val in lr_values]
+        plt.plot(eval_iters_list, lr_values, label='Learning Rate', color='red')
     plt.xlabel(f'x{log_period} Steps ({num_iter_per_epoch} per epoch)')
     plt.ylabel('Learning Rate')
     plt.legend()
     plt.title('Learning Rate Curve')
     plt.grid(True)
-
+    
+    # 第二行：mAP曲线
+    plt.subplot(2, 2, 3)
+    if eval_epoch_list and len(mAP_list) > 0:
+        # Convert CUDA tensors to CPU if needed
+        mAP_values = mAP_list
+        if len(mAP_values) > 0 and hasattr(mAP_values[0], 'cpu'):
+            mAP_values = [val.cpu().item() if hasattr(val, 'cpu') else val for val in mAP_values]
+        plt.plot(eval_epoch_list, mAP_values, label='Average mAP', marker='o', linewidth=2, markersize=6)
+    
+    # 绘制单模态mAP曲线
+    if single_modal_mAPs_history:
+        colors = ['blue', 'green', 'red', 'orange']
+        markers = ['s', '^', 'v', 'd']
+        modal_names = ['SK', 'NIR', 'CP', 'TEXT']
+        
+        for i, modal in enumerate(modal_names):
+            if modal in single_modal_mAPs_history and len(single_modal_mAPs_history[modal]) > 0:
+                # Convert CUDA tensors to CPU if needed
+                modal_values = single_modal_mAPs_history[modal]
+                if len(modal_values) > 0 and hasattr(modal_values[0], 'cpu'):
+                    modal_values = [val.cpu().item() if hasattr(val, 'cpu') else val for val in modal_values]
+                plt.plot(eval_epoch_list[-len(modal_values):], 
+                        modal_values, 
+                        label=f'{modal} mAP', 
+                        marker=markers[i], 
+                        color=colors[i], 
+                        alpha=0.8,
+                        markersize=4)
+        
+        # 计算并绘制四种单模态的平均mAP
+        if all(modal in single_modal_mAPs_history for modal in modal_names):
+            min_len = min(len(single_modal_mAPs_history[modal]) for modal in modal_names)
+            if min_len > 0:
+                avg_single_modal_mAPs = []
+                for i in range(min_len):
+                    modal_values = []
+                    for modal in modal_names:
+                        val = single_modal_mAPs_history[modal][-min_len+i]
+                        # Convert CUDA tensor to CPU if needed
+                        if hasattr(val, 'cpu'):
+                            val = val.cpu().item()
+                        modal_values.append(val)
+                    avg_mAP = sum(modal_values) / 4
+                    avg_single_modal_mAPs.append(avg_mAP)
+                plt.plot(eval_epoch_list[-min_len:], avg_single_modal_mAPs, 
+                        label='Avg Single Modal mAP', 
+                        marker='*', 
+                        color='purple', 
+                        linewidth=2,
+                        markersize=8)
+    
+    plt.xlabel('Eval-Epoch')
+    plt.ylabel('mAP Score')
+    plt.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
+    plt.title('mAP Curves')
+    plt.grid(True)
+    
+    # 第二行：其他指标曲线
+    plt.subplot(2, 2, 4)
+    # 可以绘制准确率等其他指标
+    plt.text(0.5, 0.5, 'Reserved for\nOther Metrics\n(Accuracy, etc.)', 
+             horizontalalignment='center', verticalalignment='center', 
+             transform=plt.gca().transAxes, fontsize=12)
+    plt.title('Other Metrics')
+    plt.grid(True)
+    
     plt.tight_layout()
     save_path = os.path.join(output_dir, 'curves.png')
-    plt.savefig(save_path)
+    plt.savefig(save_path, dpi=300, bbox_inches='tight')
     plt.close()
 
 
@@ -99,6 +175,32 @@ def do_train(start_epoch, args, model, train_loader, evaluator, optimizer,
     eval_iters_list = []
     eval_epoch_list = []
     eval_count = 0
+    
+    # 记录各种损失的历史
+    loss_dict = {
+        'multi_modal_contrastive_sdm_loss': [],
+        'sk_sdm_loss': [],
+        'nir_sdm_loss': [],
+        'cp_sdm_loss': [],
+        'text_sdm_loss': [],
+        'multi_modal_contrastive_itc_loss': [],
+        'sk_itc_loss': [],
+        'nir_itc_loss': [],
+        'cp_itc_loss': [],
+        'text_itc_loss': [],
+        'sdm_loss': [],
+        'itc_loss': [],
+        'id_loss': [],
+        'mlm_loss': []
+    }
+    
+    # 记录单模态mAP历史
+    single_modal_mAPs_history = {
+        'SK': [],
+        'NIR': [],
+        'CP': [],
+        'TEXT': []
+    }
 
     # 梯度累积相关变量（跨epoch累积）
     gradient_accumulation_steps = args.gradient_accumulation_steps
@@ -181,7 +283,33 @@ def do_train(start_epoch, args, model, train_loader, evaluator, optimizer,
                 train_loss_list.append(meters['loss'].avg)
                 lr_list.append(scheduler.get_lr()[0])
                 eval_iters_list.append(eval_count)
-                plot_and_save_curves(args.output_dir, len(train_loader), train_loss_list, mAP_list, lr_list, log_period, eval_iters_list, eval_epoch_list)
+                
+                # 记录各种损失
+                # 注意：meters中的key和loss_dict中的key要对应
+                loss_mapping = {
+                    'multi_modal_contrastive_sdm_loss': 'multi_modal_contrastive_sdm_loss',
+                    'sk_sdm_loss': 'sk_sdm_loss',
+                    'nir_sdm_loss': 'nir_sdm_loss', 
+                    'cp_sdm_loss': 'cp_sdm_loss',
+                    'text_sdm_loss': 'text_sdm_loss',
+                    'multi_modal_contrastive_itc_loss': 'multi_modal_contrastive_itc_loss',
+                    'sk_itc_loss': 'sk_itc_loss',
+                    'nir_itc_loss': 'nir_itc_loss',
+                    'cp_itc_loss': 'cp_itc_loss',
+                    'text_itc_loss': 'text_itc_loss',
+                    'sdm_loss': 'sdm_loss',
+                    'itc_loss': 'itc_loss',
+                    'id_loss': 'id_loss',
+                    'mlm_loss': 'mlm_loss'
+                }
+                
+                for loss_name, meter_key in loss_mapping.items():
+                    if meter_key in meters and meters[meter_key].avg > 0:
+                        loss_dict[loss_name].append(meters[meter_key].avg)
+                    else:
+                        loss_dict[loss_name].append(0)
+                
+                plot_and_save_curves(args.output_dir, len(train_loader), train_loss_list, mAP_list, lr_list, log_period, eval_iters_list, eval_epoch_list, loss_dict, single_modal_mAPs_history)
 
                 info_str = f"Epoch[{epoch}] Iteration[{n_iter + 1}/{len(train_loader)}]"
                 # log loss and acc info
@@ -220,13 +348,21 @@ def do_train(start_epoch, args, model, train_loader, evaluator, optimizer,
                 logger.info("Validation Results - Epoch: {}".format(epoch))
 
                 if args.distributed:
-                    r1, mAP = evaluator.eval(model.module.eval())
+                    r1, mAP, single_modal_mAPs = evaluator.eval(model.module.eval())
                 else:
-                    r1, mAP = evaluator.eval(model.eval())
+                    r1, mAP, single_modal_mAPs = evaluator.eval(model.eval())
                 
                 eval_epoch_list.append(epoch)
                 mAP_list.append(mAP)
-                plot_and_save_curves(args.output_dir, len(train_loader), train_loss_list, mAP_list, lr_list, log_period, eval_iters_list, eval_epoch_list)
+                
+                # 记录单模态mAP
+                for modal_name in ['SK', 'NIR', 'CP', 'TEXT']:
+                    if modal_name in single_modal_mAPs:
+                        single_modal_mAPs_history[modal_name].append(single_modal_mAPs[modal_name])
+                    else:
+                        single_modal_mAPs_history[modal_name].append(0)
+                
+                plot_and_save_curves(args.output_dir, len(train_loader), train_loss_list, mAP_list, lr_list, log_period, eval_iters_list, eval_epoch_list, loss_dict, single_modal_mAPs_history)
 
                 torch.cuda.empty_cache()
                 if best_mAP < mAP:

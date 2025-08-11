@@ -37,7 +37,10 @@ class IRRA(nn.Module):
 
 
         if 'id' in args.loss_names:
-            self.classifier = nn.Linear(self.embed_dim, self.num_classes)
+            # For safetensors (FGCLIP/Transformers), encode_image/text return projected features with dim = projection_dim
+            # For original OpenAI .pt models, we use the CLS token feature with dim = embed_dim
+            id_in_features = self.base_model.config.projection_dim if self.is_safetensors else self.embed_dim
+            self.classifier = nn.Linear(id_in_features, self.num_classes)
             nn.init.normal_(self.classifier.weight.data, std=0.001)
             nn.init.constant_(self.classifier.bias.data, val=0.0)
 

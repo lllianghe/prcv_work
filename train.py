@@ -76,10 +76,25 @@ if __name__ == '__main__':
     
 
     start_epoch = 1
+    
+    # 根据参数分别控制multimodal embedding和projection层的初始化
+    add_embeddings = args.add_multimodal_embeddings or args.add_multimodal_layers
+    add_projections = args.add_multimodal_projections or args.add_multimodal_layers
+    
     # 统一的检查点加载逻辑
     if args.resume:
         logger.info(f"Loading checkpoint from {args.resume_ckpt_file}")
-        if not args.add_multimodal_layers:
+        # 检查是否需要严格模式
+        # 严格模式条件：不需要添加任何多模态层，或者需要的层都已经存在
+        has_multimodal_embeddings = hasattr(model.base_model, 'vision_model') and hasattr(model.base_model.vision_model.embeddings, 'modality_patch_embeddings') and model.base_model.vision_model.embeddings.modality_patch_embeddings
+        has_multimodal_projections = hasattr(model.base_model, 'modality_visual_projections') and model.base_model.modality_visual_projections
+        
+        # 使用严格模式的条件：需要的层都已经存在
+        # 对于每个层：要么不需要添加，要么已经存在
+        need_strict_mode = (not add_embeddings or has_multimodal_embeddings) and \
+                          (not add_projections or has_multimodal_projections)
+        
+        if need_strict_mode:
             # 严格模式：用于多模态检查点
             checkpoint = checkpointer.resume(args.resume_ckpt_file, strict=True)
             logger.info("Using strict loading mode for multimodal checkpoint")
@@ -103,22 +118,36 @@ if __name__ == '__main__':
             # 重置训练起始epoch为1，忽略checkpoint中的epoch信息
             logger.info("Optimizer, scheduler have been reset to use new parameters")
             
-            # 自动添加多模态embedding层
-            if hasattr(model.base_model, 'vision_model'):
+            # 根据参数分别添加多模态层
+            if add_embeddings and hasattr(model.base_model, 'vision_model'):
                 logger.info("Automatically adding multimodal embedding layers for single-modal checkpoint")
                 modalities = ['vis', 'sk', 'nir', 'cp']
                 for modality in modalities:
                     model.base_model.vision_model.embeddings.add_patch_embedding(modality)
                 model.base_model.vision_model.embeddings.patch_embedding.weight.requires_grad = False
                 model.to(device)
+            
+            if add_projections:
+                # 设置多模态projection层
+                logger.info("Setting up multi-modal projection layers")
+                model.base_model.setup_multi_projections()
+                model.to(device)
     else:
         logger.info("Start training without loading checkpoint")
-        if args.add_multimodal_layers:
+        
+        # 根据参数分别添加多模态层
+        if add_embeddings:
             logger.info("Manually adding multimodal embedding layers")
             modalities = ['vis', 'sk', 'nir', 'cp']
             for modality in modalities:
                 model.base_model.vision_model.embeddings.add_patch_embedding(modality)
             model.base_model.vision_model.embeddings.patch_embedding.weight.requires_grad = False
+            model.to(device)
+            
+        if add_projections:
+            # 设置多模态projection层
+            logger.info("Setting up multi-modal projection layers")
+            model.base_model.setup_multi_projections()
             model.to(device)
 
     if args.dataset_name == 'ORBench':

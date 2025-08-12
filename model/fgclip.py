@@ -77,8 +77,64 @@ class FGCLIPModel(CLIPModel):
         self.embed_dim = text_config.hidden_size
         self.world_size = 0
 
+        # 用于存储不同模态的visual_projection层的字典
+        self.modality_visual_projections = nn.ModuleDict()
+
         # Initialize weights and apply final processing
         self.post_init()
+
+    def add_visual_projection(self, modality: str):
+        """
+        为指定模态添加新的visual_projection层，并深拷贝原始预训练权重
+        
+        Args:
+            modality (str): 模态名称，如 'vis', 'cp', 'sk', 'nir' 等
+        """
+        import copy
+        
+        if modality in self.modality_visual_projections:
+            print(f"Warning: Modality '{modality}' visual projection already exists. Skipping.")
+            return
+            
+        # 创建新的visual_projection层并深拷贝原始权重
+        new_visual_projection = nn.Linear(self.vision_embed_dim, self.projection_dim, bias=False)
+        
+        # 深拷贝原始visual_projection的权重
+        with torch.no_grad():
+            new_visual_projection.weight.copy_(self.visual_projection.weight.clone())
+            
+        self.modality_visual_projections[modality] = new_visual_projection
+        print(f"Added visual_projection for modality: {modality}")
+
+    def setup_multi_projections(self):
+        """
+        设置多模态projection层：
+        - 3个图像查询模态(cp, sk, nir)和vis模态共用一个projection层
+        - 剩下一个projection层用来和text的projection层匹配
+        """
+        # 为vis, cp, sk, nir创建共享的projection层 (基于原始visual_projection)
+        shared_modalities = ['vis', 'cp', 'sk', 'nir']
+        for modality in shared_modalities:
+            self.add_visual_projection(modality)
+        
+        print(f"Shared projection (vis/cp/sk/nir): {len([m for m in shared_modalities if m in self.modality_visual_projections])} layers")
+
+    def get_visual_projection_layer(self, modality: str):
+        """
+        根据模态选择相应的visual projection层
+        
+        Args:
+            modality (str): 模态名称
+            
+        Returns:
+            nn.Linear: 对应的projection层
+        """
+        # 如果模态在字典中，使用对应的层
+        if modality in self.modality_visual_projections:
+            return self.modality_visual_projections[modality]
+        
+        # 如果都没有，使用原始的visual_projection
+        return self.visual_projection
 
 
     def resize_postion_embeding(self, newsize=248):
@@ -150,13 +206,16 @@ class FGCLIPModel(CLIPModel):
         )
 
         pooled_output = vision_outputs[1]  # pooled_output
-        image_features = self.visual_projection(pooled_output)
+        # 使用模态特定的projection层
+        projection_layer = self.get_visual_projection_layer(modality)
+        image_features = projection_layer(pooled_output)
 
         return image_features
     
     def get_image_box_roi_features(
         self,
         pixel_values: Optional[torch.FloatTensor] = None,
+        modality: str = 'vis',
         output_attentions: Optional[bool] = None,
         output_hidden_states: Optional[bool] = None,
         return_dict: Optional[bool] = None,
@@ -186,7 +245,9 @@ class FGCLIPModel(CLIPModel):
         feature_map = self.forward_without_attn(feature_map)[:, 1:]
 
         feature_map = self.vision_model.post_layernorm(feature_map)
-        feature_map = self.visual_projection(feature_map)
+        # 使用模态特定的projection层
+        projection_layer = self.get_visual_projection_layer(modality)
+        feature_map = projection_layer(feature_map)
 
         feature_map = feature_map.view(bs, h, w, -1).permute(0, 3, 1, 2)
         x_rois = roi_align(feature_map.type(torch.float32),box_info, (1, 1), 1.0, -1, True)[..., 0, 0]
@@ -265,6 +326,7 @@ class FGCLIPModel(CLIPModel):
     def get_image_dense_features(
         self,
         pixel_values: Optional[torch.FloatTensor] = None,
+        modality: str = 'vis',
         output_attentions: Optional[bool] = None,
         output_hidden_states: Optional[bool] = None,
         return_dict: Optional[bool] = None,
@@ -295,7 +357,9 @@ class FGCLIPModel(CLIPModel):
         feature_map = self.forward_without_attn(feature_map)[:, 1:]
 
         feature_map = self.vision_model.post_layernorm(feature_map)
-        feature_map = self.visual_projection(feature_map)
+        # 使用模态特定的projection层
+        projection_layer = self.get_visual_projection_layer(modality)
+        feature_map = projection_layer(feature_map)
 
         return feature_map
 

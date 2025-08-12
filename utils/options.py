@@ -32,8 +32,14 @@ def get_args():
     parser.add_argument("--val_dataset",default="test") # use val set when evaluate, if test use test set
     parser.add_argument("--resume", default=False, action='store_true')
     parser.add_argument("--resume_ckpt_file", default="", help='resume from checkpoint file')
+    parser.add_argument('--add_multimodal_embeddings', action='store_true', default=False,
+                        help='Add multimodal embedding layers when loading checkpoint. '
+                             'When True, adds modality-specific patch embeddings for vis, sk, nir, cp.')
+    parser.add_argument('--add_multimodal_projections', action='store_true', default=False,
+                        help='Add multimodal projection layers when loading checkpoint. '
+                             'When True, adds modality-specific visual projection layers.')
     parser.add_argument('--add_multimodal_layers', action='store_true', default=False,
-                        help='Add multimodal layers when loading checkpoint. '
+                        help='Add both multimodal embedding and projection layers (equivalent to both flags above). '
                              'When True, loads single-modal checkpoint and automatically adds multimodal layers. '
                              'When False, loads multimodal checkpoint in strict mode.')
 

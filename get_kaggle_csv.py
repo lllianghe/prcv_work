@@ -188,11 +188,30 @@ if __name__ == '__main__':
     test_gallery_loader = DataLoader(test_gallery_dataset, batch_size=args.test_batch_size, shuffle=False)
     
     model = build_model(args,num_classes=int(400*(1-args.test_size))) #num_class必须和之前构建的model中的num_class对应
+    
+    # 根据参数分别控制multimodal embedding和projection层的初始化
+    add_embeddings = args.add_multimodal_embeddings or args.add_multimodal_layers
+    add_projections = args.add_multimodal_projections or args.add_multimodal_layers
+    
+    if add_embeddings:
+        # 初始化多模态embedding层
+        if hasattr(model.base_model, 'vision_model'):
+            modalities = ['vis', 'sk', 'nir', 'cp']
+            for modality in modalities:
+                model.base_model.vision_model.embeddings.add_patch_embedding(modality)
+    
+    if add_projections:
+        # 初始化多模态projection层
+        model.base_model.setup_multi_projections()
+    
     checkpointer = Checkpointer(model)
     checkpointer.load(f=op.join(args.output_dir, 'best.pth'))
     model.to(device)
     
-    if args.add_multimodal_layers:
+    # 判断是否使用多模态特征提取（需要同时有embedding和projection）
+    use_multimodal = add_embeddings and add_projections
+    
+    if use_multimodal:
         gfeats_dict = embedding_gfeats_with_multiembeddings(model, test_gallery_loader)
         print(f"embedding_gfeats_with_multiembeddings success")
     else:
@@ -211,7 +230,7 @@ if __name__ == '__main__':
             test_query_loader = DataLoader(test_query_dataset, batch_size=args.test_batch_size, shuffle=False)
             qfeats = embedding_qfeats(model, test_query_loader, current_query_type)
             modalities_list = current_query_type.split("_") 
-            if args.add_multimodal_layers:
+            if use_multimodal:
                 gfeats_to_combine = [gfeats_dict[m] for m in modalities_list if m in gfeats_dict and len(gfeats_dict[m]) > 0]
                 if not gfeats_to_combine:
                     logger.warning(f"No features found for query type: {current_query_type}. Skipping.")

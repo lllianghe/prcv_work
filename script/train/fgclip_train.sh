@@ -1,6 +1,6 @@
 DATASET_NAME="ORBench"
 
-CUDA_VISIBLE_DEVICES=2 \
+CUDA_VISIBLE_DEVICES=7 \
 python train.py \
 --batch_size 24 \
 --loss_name 'multi_modal_contrastive+itc' \
@@ -22,4 +22,3 @@ python train.py \
 --step_size 2000 \
 --img_size 224,224 \
 --add_multimodal_embeddings \
---add_multimodal_projections \

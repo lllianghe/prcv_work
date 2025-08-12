@@ -167,6 +167,11 @@ def do_train(start_epoch, args, model, train_loader, evaluator, optimizer,
     tb_writer = SummaryWriter(log_dir=args.output_dir)
 
     best_mAP = 0.0
+    best_sk_mAP = 0.0
+    best_nir_mAP = 0.0
+    best_cp_mAP = 0.0
+    best_text_mAP = 0.0
+    best_singlemodal_mAP = 0.0
 
     # Lists to store metrics for plotting
     train_loss_list = []
@@ -369,7 +374,28 @@ def do_train(start_epoch, args, model, train_loader, evaluator, optimizer,
                     best_mAP = mAP
                     arguments["best_mAP_epoch"] = epoch
                     checkpointer.save("best", **arguments)
+                if best_singlemodal_mAP < (single_modal_mAPs['SK']+single_modal_mAPs['NIR']+single_modal_mAPs['CP']+single_modal_mAPs['TEXT'])/4:
+                    best_singlemodal_mAP = (single_modal_mAPs['SK']+single_modal_mAPs['NIR']+single_modal_mAPs['CP']+single_modal_mAPs['TEXT'])/4
+                    arguments["best_singlemodal_mAP_epoch"] = epoch
+                    checkpointer.save("best_singlemodal", **arguments)
+                if best_sk_mAP < single_modal_mAPs['SK']:
+                    best_sk_mAP = single_modal_mAPs['SK']
+                    arguments["best_sk_mAP_epoch"] = epoch
+                if best_nir_mAP < single_modal_mAPs['NIR']:
+                    best_nir_mAP = single_modal_mAPs['NIR']
+                    arguments["best_nir_mAP_epoch"] = epoch
+                if best_cp_mAP < single_modal_mAPs['CP']:
+                    best_cp_mAP = single_modal_mAPs['CP']
+                    arguments["best_cp_mAP_epoch"] = epoch
+                if best_text_mAP < single_modal_mAPs['TEXT']:
+                    best_text_mAP = single_modal_mAPs['TEXT']
+                    arguments["best_text_mAP_epoch"] = epoch
                 logger.info(f"best mAP: {best_mAP} at epoch {arguments['best_mAP_epoch']}")
+                logger.info(f"best singlemodal mAP: {best_singlemodal_mAP} at epoch {arguments['best_singlemodal_mAP_epoch']}")
+                logger.info(f"best sk mAP: {best_sk_mAP} at epoch {arguments['best_sk_mAP_epoch']}")
+                logger.info(f"best nir mAP: {best_nir_mAP} at epoch {arguments['best_nir_mAP_epoch']}")
+                logger.info(f"best cp mAP: {best_cp_mAP} at epoch {arguments['best_cp_mAP_epoch']}")
+                logger.info(f"best text mAP: {best_text_mAP} at epoch {arguments['best_text_mAP_epoch']}")
 
 
 def do_inference(model, test_img_loader, test_txt_loader):

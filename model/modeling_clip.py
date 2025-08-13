@@ -219,9 +219,32 @@ class CLIPVisionEmbeddings(nn.Module):
         # 深拷贝原始patch_embedding的权重
         with torch.no_grad():
             new_patch_embedding.weight.copy_(self.patch_embedding.weight.clone())
+        new_patch_embedding.weight.requires_grad = True
             
         self.modality_patch_embeddings[modality] = new_patch_embedding
         print(f"Added patch_embedding for modality: {modality}")
+
+    def setup_multi_embeddings(self, use_pairs=False):
+        """
+        设置多模态embedding层：
+        
+        Args:
+            use_pairs (bool): 控制多模态层的使用方式
+                - True: vis和nir/sk/cp共用embedding层，text使用自己的embedding (默认行为)
+                - False: 每个模态使用独立的embedding层
+        """
+        if use_pairs:
+            # 配对模式：vis, cp, sk, nir共享embedding层
+            shared_modalities = ['vis', 'cp', 'sk', 'nir']
+            for modality in shared_modalities:
+                self.add_patch_embedding(modality)
+            print(f"Paired mode: vis/cp/sk/nir share embeddings ({len([m for m in shared_modalities if m in self.modality_patch_embeddings])} layers)")
+        else:
+            # 独立模式：每个模态使用独立的embedding层
+            independent_modalities = ['vis', 'cp', 'sk', 'nir']
+            for modality in independent_modalities:
+                self.add_patch_embedding(modality)
+            print(f"Independent mode: each modality has separate embeddings ({len([m for m in independent_modalities if m in self.modality_patch_embeddings])} layers)")
 
     def forward(self, pixel_values: torch.FloatTensor, interpolate_pos_encoding=True, modality='') -> torch.Tensor:
 
@@ -237,6 +260,8 @@ class CLIPVisionEmbeddings(nn.Module):
             # print(f"{modality} embedding start\n")
         else:
             patch_embedding_layer = self.patch_embedding
+            
+
 
         target_dtype = patch_embedding_layer.weight.dtype
         patch_embeds = patch_embedding_layer(pixel_values.to(dtype=target_dtype))  # shape = [*, width, grid, grid]

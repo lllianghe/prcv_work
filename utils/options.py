@@ -42,6 +42,12 @@ def get_args():
                         help='Add both multimodal embedding and projection layers (equivalent to both flags above). '
                              'When True, loads single-modal checkpoint and automatically adds multimodal layers. '
                              'When False, loads multimodal checkpoint in strict mode.')
+    parser.add_argument('--use_multimodal_layers_in_pairs', action='store_true', default=False,
+                        help='Control how multimodal layers are used. '
+                             'When True (default behavior): vis shares embeddings/projections with nir/sk/cp, '
+                             'text uses its own projection (5 total: vis+text+3 shared). '
+                             'When False: each modality uses separate embeddings/projections '
+                             '(5 total: vis+text+nir+sk+cp).')
 
     ######################## model general settings ########################
     parser.add_argument("--pretrain_choice", default='ViT-B/16') # whether use pretrained model

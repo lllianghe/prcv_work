@@ -104,10 +104,11 @@ class Evaluator():
 
 
 class Evaluator_OR():
-    def __init__(self, img_loader, txt_loader):
+    def __init__(self, img_loader, txt_loader, use_multimodal_layers_in_pairs=False):
         self.img_loader = img_loader # gallery
         self.txt_loader = txt_loader # query
         self.logger = logging.getLogger("IRRA.eval")
+        self.use_multimodal_layers_in_pairs = use_multimodal_layers_in_pairs
 
     def _compute_embedding(self, model):
         model = model.eval()
@@ -115,8 +116,10 @@ class Evaluator_OR():
 
         qids, gids = [], []
         # A dictionary to store features for each modality
-        gfeats_dict = {'TEXT': [], 'CP': [], 'SK': [], 'NIR': []}
+        # query: four modalities always
         qfeats_dict = {'TEXT': [], 'CP': [], 'SK': [], 'NIR': []}
+        # gallery: either four branches (pairs=True) or single 'VIS' branch (pairs=False)
+        gfeats_dict = {'TEXT': [], 'CP': [], 'SK': [], 'NIR': [], 'VIS': []}
 
         # text/query loader
         for pid, cp_img, sk_img, nir_img, caption in self.txt_loader:
@@ -148,25 +151,28 @@ class Evaluator_OR():
         for pid, img in self.img_loader:
             gids.append(pid.view(-1))
             with torch.no_grad():
-                # TEXT
                 img = img.to(device)
-                text_feat = model.encode_image(img, modality='vis')
-                gfeats_dict['TEXT'].append(text_feat)
-                # CP
-                cp_feat = model.encode_image(img, modality='cp')
-                gfeats_dict['CP'].append(cp_feat)
-                # SK
-                sk_feat = model.encode_image(img, modality='sk')
-                gfeats_dict['SK'].append(sk_feat)
-                # NIR
-                nir_feat = model.encode_image(img, modality='nir')
-                gfeats_dict['NIR'].append(nir_feat)
+                if self.use_multimodal_layers_in_pairs:
+                    # produce four gallery branches to match corresponding queries
+                    text_feat = model.encode_image(img, modality='vis')
+                    gfeats_dict['TEXT'].append(text_feat)
+                    cp_feat = model.encode_image(img, modality='cp')
+                    gfeats_dict['CP'].append(cp_feat)
+                    sk_feat = model.encode_image(img, modality='sk')
+                    gfeats_dict['SK'].append(sk_feat)
+                    nir_feat = model.encode_image(img, modality='nir')
+                    gfeats_dict['NIR'].append(nir_feat)
+                else:
+                    # single VIS gallery - 通过模态回退机制，所有模态调用都会使用同一个默认 visual_projection
+                    vis_feat = model.encode_image(img, modality='vis')  # 回退到默认层
+                    gfeats_dict['VIS'].append(vis_feat)
         gids = torch.cat(gids, 0)
         for modality in gfeats_dict:
             if gfeats_dict[modality] and len(gfeats_dict[modality]) > 0:
                  gfeats_dict[modality] = torch.cat(gfeats_dict[modality], 0)
 
         return qfeats_dict, gfeats_dict, qids, gids
+    
     
     def eval(self, model, i2t_metric=False, modalities=["onemodal_SK", "onemodal_NIR", "onemodal_CP", "onemodal_TEXT", '' ,"twomodal_SK_NIR", "twomodal_SK_CP","twomodal_SK_TEXT", "twomodal_NIR_CP", "twomodal_NIR_TEXT", "twomodal_CP_TEXT", '', "threemodal_SK_NIR_CP", "threemodal_SK_NIR_TEXT", "threemodal_SK_CP_TEXT", "threemodal_NIR_CP_TEXT", '', "fourmodal_SK_TEXT_CP_NIR"]):
         
@@ -189,21 +195,25 @@ class Evaluator_OR():
 
             modalities_list = modality_strategy.split("_")[1:] # e.g., from "fourmodal_SK_TEXT_CP_NIR" to ['SK', 'TEXT', 'CP', 'NIR']
             
-            # Combine features for the current strategy
+            # Combine features for the current strategy (query)
             feats_to_combine = [qfeats_dict[m] for m in modalities_list if m in qfeats_dict and len(qfeats_dict[m]) > 0]
             if not feats_to_combine:
                 self.logger.warning(f"No features found for modality strategy: {modality_strategy}. Skipping.")
                 continue
             qfeats = sum(feats_to_combine) / len(feats_to_combine)
             
-            gfeats_to_combine = [gfeats_dict[m] for m in modalities_list if m in gfeats_dict and len(gfeats_dict[m]) > 0]
-            if not gfeats_to_combine:
-                self.logger.warning(f"No features found for modality strategy: {modality_strategy}. Skipping.")
-                continue
-            gfeats = sum(gfeats_to_combine) / len(gfeats_to_combine)
+            # Combine gallery features based on pairing flag
+            if self.use_multimodal_layers_in_pairs:
+                gfeats_to_combine = [gfeats_dict[m] for m in modalities_list if m in gfeats_dict and len(gfeats_dict[m]) > 0]
+                if not gfeats_to_combine:
+                    self.logger.warning(f"No gallery features found for modality strategy: {modality_strategy}. Skipping.")
+                    continue
+                gfeats = sum(gfeats_to_combine) / len(gfeats_to_combine)
+            else:
+                gfeats = gfeats_dict["VIS"]
 
-            qfeats = F.normalize(qfeats, p=2, dim=1)  # text features (query)
-            gfeats = F.normalize(gfeats, p=2, dim=1)  # image features (gallery)
+            qfeats = F.normalize(qfeats, p=2, dim=1)  # query features
+            gfeats = F.normalize(gfeats, p=2, dim=1)  # gallery features
 
             # Calculate similarity
             similarity = qfeats @ gfeats.t()

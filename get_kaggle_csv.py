@@ -4,6 +4,8 @@ import torch
 import numpy as np
 import time
 import os.path as op
+
+from transformers.models.auto.feature_extraction_auto import get_feature_extractor_config
 from utils.metrics import Evaluator, Evaluator_OR
 from datasets import build_dataloader
 from processor.processor import do_inference
@@ -140,13 +142,14 @@ def embedding_gfeats(model, test_gallery_loader):
     gfeats = torch.cat(gfeats, 0)
     return gfeats
 
-def embedding_gfeats_with_multiembeddings(model, test_gallery_loader):
+def embedding_gfeats_with_multiembeddings(model, test_gallery_loader, use_multimodal_layers_in_pairs):
     model = model.eval()
     device = next(model.parameters()).device
     
-    gfeats_dict = {'TEXT': [], 'CP': [], 'SK': [], 'NIR': []}
+    gfeats_dict = {'TEXT': [], 'CP': [], 'SK': [], 'NIR': [], 'VIS': []}
     for idx, img in test_gallery_loader:
         with torch.no_grad():
+            if use_multimodal_layers_in_pairs:
                 # TEXT
                 img = img.to(device)
                 text_feat = model.encode_image(img, modality='vis')
@@ -160,6 +163,11 @@ def embedding_gfeats_with_multiembeddings(model, test_gallery_loader):
                 # NIR
                 nir_feat = model.encode_image(img, modality='nir')
                 gfeats_dict['NIR'].append(nir_feat)
+            else:
+                img = img.to(device)
+                text_feat = model.encode_image(img, modality='vis')
+                gfeats_dict['VIS'].append(text_feat)
+
     for modality in gfeats_dict:
         if gfeats_dict[modality] and len(gfeats_dict[modality]) > 0:
                 gfeats_dict[modality] = torch.cat(gfeats_dict[modality], 0)
@@ -211,12 +219,9 @@ if __name__ == '__main__':
     # 判断是否使用多模态特征提取（需要同时有embedding和projection）
     use_multimodal = add_embeddings and add_projections
     
-    if use_multimodal:
-        gfeats_dict = embedding_gfeats_with_multiembeddings(model, test_gallery_loader)
-        print(f"embedding_gfeats_with_multiembeddings success")
-    else:
-        gfeats = embedding_gfeats(model, test_gallery_loader)
-        print(f"embedding_gfeats success")
+    # 统一使用 embedding_gfeats_with_multiembeddings，它会根据 use_multimodal_layers_in_pairs 参数处理回退逻辑
+    gfeats_dict = embedding_gfeats_with_multiembeddings(model, test_gallery_loader, args.use_multimodal_layers_in_pairs if use_multimodal else False)
+    print(f"embedding_gfeats_with_multiembeddings success")
     json_file = '/SSD_Data01/PRCV-ReID5o/data/ORBench_PRCV/val/val_queries.json'
     query_type_ranges = get_query_type_idx_range(json_file)
     output_file=op.join(args.output_dir, 'ranking_list.csv')
@@ -230,12 +235,18 @@ if __name__ == '__main__':
             test_query_loader = DataLoader(test_query_dataset, batch_size=args.test_batch_size, shuffle=False)
             qfeats = embedding_qfeats(model, test_query_loader, current_query_type)
             modalities_list = current_query_type.split("_") 
-            if use_multimodal:
+            
+            # 根据 use_multimodal 和 use_multimodal_layers_in_pairs 选择 gallery 特征组合方式
+            if use_multimodal and args.use_multimodal_layers_in_pairs:
+                # 多模态且使用分支配对：组合对应的模态特征
                 gfeats_to_combine = [gfeats_dict[m] for m in modalities_list if m in gfeats_dict and len(gfeats_dict[m]) > 0]
                 if not gfeats_to_combine:
                     logger.warning(f"No features found for query type: {current_query_type}. Skipping.")
                     continue
                 gfeats = sum(gfeats_to_combine) / len(gfeats_to_combine)
+            else:
+                # 单模态或多模态但不使用分支配对：使用单一 VIS 特征
+                gfeats = gfeats_dict["VIS"]
             qfeats = F.normalize(qfeats, p=2, dim=1)  # 归一化
             gfeats = F.normalize(gfeats, p=2, dim=1)
             similarity = qfeats @ gfeats.t()  # q * g

@@ -28,13 +28,14 @@ def build_optimizer(args, model):
         if "classifier" in key or "mlm_head" in key:
             lr = args.lr * args.lr_factor
         
+        """
         # 当启用add_multimodal_projections或add_multimodal_layers时，为特定的projection层设置4倍学习率
         if add_projections:
             # 只针对fgclip.py中定义的特定projection层：text_projection和modality_visual_projections
             if ("text_projection" in key or "modality_visual_projections" in key):
                 lr = args.lr * 4.0  # 将特定projection层学习率提高4倍
                 print(f"Setting FGCLIPModel projection layer '{key}' learning rate to {lr} (4x base rate)")
-        
+        """
         # weight_decay用于l2正则化来防止过拟合
         params += [{"params": [value], "lr": lr, "weight_decay": weight_decay}]
 

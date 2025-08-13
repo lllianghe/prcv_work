@@ -102,22 +102,44 @@ class FGCLIPModel(CLIPModel):
         # 深拷贝原始visual_projection的权重
         with torch.no_grad():
             new_visual_projection.weight.copy_(self.visual_projection.weight.clone())
+        new_visual_projection.weight.requires_grad = True
             
         self.modality_visual_projections[modality] = new_visual_projection
         print(f"Added visual_projection for modality: {modality}")
 
-    def setup_multi_projections(self):
+    def setup_multi_projections(self, use_pairs=True):
         """
         设置多模态projection层：
-        - 3个图像查询模态(cp, sk, nir)和vis模态共用一个projection层
-        - 剩下一个projection层用来和text的projection层匹配
-        """
-        # 为vis, cp, sk, nir创建共享的projection层 (基于原始visual_projection)
-        shared_modalities = ['vis', 'cp', 'sk', 'nir']
-        for modality in shared_modalities:
-            self.add_visual_projection(modality)
         
-        print(f"Shared projection (vis/cp/sk/nir): {len([m for m in shared_modalities if m in self.modality_visual_projections])} layers")
+        Args:
+            use_pairs (bool): 控制多模态层的使用方式
+                - True: vis和nir/sk/cp共用projection层，text使用自己的projection (默认行为)
+                - False: 每个模态使用独立的projection层
+        """
+        if use_pairs:
+            # 配对模式：vis, cp, sk, nir共享projection层
+            shared_modalities = ['vis', 'cp', 'sk', 'nir']
+            for modality in shared_modalities:
+                self.add_visual_projection(modality)
+            print(f"Paired mode: vis/cp/sk/nir share projections ({len([m for m in shared_modalities if m in self.modality_visual_projections])} layers)")
+        else:
+            # 独立模式：每个模态使用独立的projection层
+            independent_modalities = ['vis', 'cp', 'sk', 'nir']
+            for modality in independent_modalities:
+                self.add_visual_projection(modality)
+            print(f"Independent mode: each modality has separate projections ({len([m for m in independent_modalities if m in self.modality_visual_projections])} layers)")
+
+    def setup_multi_embeddings(self, use_pairs=True):
+        """
+        设置多模态embedding层：
+        
+        Args:
+            use_pairs (bool): 控制多模态层的使用方式
+                - True: vis和nir/sk/cp共用embedding层，text使用自己的embedding (默认行为)
+                - False: 每个模态使用独立的embedding层
+        """
+        # 调用vision_model的embeddings层的setup_multi_embeddings方法
+        self.vision_model.embeddings.setup_multi_embeddings(use_pairs)
 
     def get_visual_projection_layer(self, modality: str):
         """
@@ -208,6 +230,7 @@ class FGCLIPModel(CLIPModel):
         pooled_output = vision_outputs[1]  # pooled_output
         # 使用模态特定的projection层
         projection_layer = self.get_visual_projection_layer(modality)
+
         image_features = projection_layer(pooled_output)
 
         return image_features

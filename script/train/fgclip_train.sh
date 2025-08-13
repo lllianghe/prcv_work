@@ -23,4 +23,4 @@ python train.py \
 --img_size 224,224 \
 --add_multimodal_embeddings \
 --add_multimodal_projections \
-
+--use_multimodal_layers_in_pairs \

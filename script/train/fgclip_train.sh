@@ -21,6 +21,16 @@ python train.py \
 --power 0.5 \
 --step_size 2000 \
 --img_size 224,224 \
---add_multimodal_embeddings \
 --add_multimodal_projections \
+
+
+
+"""
+--freeze_embedding_layers \
+--freeze_projection_layers \
+
+--add_multimodal_embeddings \
+
 --use_multimodal_layers_in_pairs \
+"""
+

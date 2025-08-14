@@ -29,7 +29,7 @@ class IRRA(nn.Module):
         self.num_classes = num_classes
         self._set_task()
 
-        self.base_model, base_cfg = build_CLIP_from_openai_pretrained(name = args.pretrain_choice, image_size = args.img_size, stride_size = args.stride_size)
+        self.base_model, base_cfg = build_CLIP_from_openai_pretrained(name = args.pretrain_choice, image_size = args.img_size, stride_size = args.stride_size, args=args)
         self.embed_dim = base_cfg['embed_dim']
         self.is_safetensors = os.path.splitext(args.pretrain_choice)[1].lstrip('.') == 'safetensors'
 
@@ -195,31 +195,6 @@ class IRRA(nn.Module):
                             scaler.scale(qg_loss).backward()
                         else:
                             qg_loss.backward()
-
-                        """
-                        vis_grad = self.base_model.modality_visual_projections['vis'].weight.grad
-                        print(f"projection_layer of vis weight:", self.base_model.modality_visual_projections['vis'].weight[256][393], None if vis_grad is None else vis_grad.flatten()[:3])
-                        
-                        sk_grad = self.base_model.modality_visual_projections['sk'].weight.grad
-                        print(f"projection_layer of sk weight:", self.base_model.modality_visual_projections['sk'].weight[256][393], None if sk_grad is None else sk_grad.flatten()[:3])
-                        
-                        cp_grad = self.base_model.modality_visual_projections['cp'].weight.grad
-                        print(f"projection_layer of cp weight:", self.base_model.modality_visual_projections['cp'].weight[256][393], None if cp_grad is None else cp_grad.flatten()[:3])
-                        
-                        nir_grad = self.base_model.modality_visual_projections['nir'].weight.grad
-                        print(f"projection_layer of nir weight:", self.base_model.modality_visual_projections['nir'].weight[256][393], None if nir_grad is None else nir_grad.flatten()[:3])
-                        
-                        visual_proj_grad = self.base_model.visual_projection.weight.grad
-                        print(f"projection_layer of weight:", self.base_model.visual_projection.weight[256][393], None if visual_proj_grad is None else visual_proj_grad.flatten()[:3])
-                        
-                        #patch_emb_grad = self.base_model.vision_model.embeddings.modality_patch_embeddings['vis'].weight.grad
-                        #print(f"patch_embedding_layer of weight:", self.base_model.vision_model.embeddings.modality_patch_embeddings['vis'].weight[100][2][8][8], None if patch_emb_grad is None else patch_emb_grad.flatten()[:3])
-                        #patch_emb_main_grad = self.base_model.vision_model.embeddings.patch_embedding.weight.grad
-                        #print(f"patch_embedding_layer of weight:", self.base_model.vision_model.embeddings.patch_embedding.weight[100][2][8][8], None if patch_emb_main_grad is None else patch_emb_main_grad.flatten()[:3])
-
-                        print('\n')
-                        """
-
 
                         
                         '''
@@ -429,6 +404,8 @@ class IRRA(nn.Module):
                             scaler.scale(qg_loss).backward()
                         else:
                             qg_loss.backward()
+
+
                         
                         '''
                         # 跨模态对比学习：需要重新计算特征因为计算图已被清空

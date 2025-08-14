@@ -172,7 +172,22 @@ if __name__ == '__main__':
         
         logger.info(f"优化器已更新，包含 {sum(len(group['params']) for group in optimizer.param_groups)} 个参数组")
     
+    model.base_model.vision_model.embeddings.patch_embedding.weight.requires_grad = not(args.freeze_embedding_layers)
+    for keys, values in model.base_model.vision_model.embeddings.modality_patch_embeddings.items():
+        model.base_model.vision_model.embeddings.modality_patch_embeddings[keys].weight.requires_grad = not(args.freeze_embedding_layers)
+    
+    model.base_model.visual_projection.weight.requires_grad = not(args.freeze_projection_layers)
+    for keys, values in model.base_model.modality_visual_projections.items():
+        model.base_model.modality_visual_projections[keys].weight.requires_grad = not(args.freeze_projection_layers)
+    
     model.to(device)
+
+
+
+
+
+
+
 
     if args.dataset_name == 'ORBench':
         evaluator = Evaluator_OR(val_img_loader, val_txt_loader) # 用于评估检索性能的类

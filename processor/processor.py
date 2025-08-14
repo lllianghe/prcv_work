@@ -236,7 +236,27 @@ def do_train(start_epoch, args, model, train_loader, evaluator, optimizer,
             if accumulation_count == 0:
                 optimizer.zero_grad()
 
+            """
+            # 验证种子是否受到影响
+            print(f"{batch['pids'][0]}")
+            """
+
             ret = model(batch,scaler)
+            
+            """
+            # 验证模型权重是否更新
+            print(f"projection_layer of base weight: {model.base_model.visual_projection.weight[0][0]:.7f}", f" | grad: {0 if model.base_model.visual_projection.weight.grad is None else model.base_model.visual_projection.weight.grad.flatten()[0]:.7f}")
+            for key, value in model.base_model.modality_visual_projections.items():
+                vis_grad = model.base_model.modality_visual_projections[key].weight.grad
+                print(f"projection_layer of {key} weight: {model.base_model.modality_visual_projections[key].weight[0][0]:.7f}", f" | grad: {0 if vis_grad is None else vis_grad.flatten()[0]:.7f}", f" | equal to base: {(model.base_model.modality_visual_projections[key].weight == model.base_model.visual_projection.weight).all()}")
+            
+            print(f"patch_embedding_layer of base weight: {model.base_model.vision_model.embeddings.patch_embedding.weight[0][0][0][0]:.7f}", f" | grad: {0 if model.base_model.vision_model.embeddings.patch_embedding.weight.grad is None else model.base_model.vision_model.embeddings.patch_embedding.weight.grad.flatten()[0]:.7f}")
+            for key, value in model.base_model.vision_model.embeddings.modality_patch_embeddings.items():
+                patch_emb_grad = model.base_model.vision_model.embeddings.modality_patch_embeddings[key].weight.grad
+                print(f"patch_embedding_layer of {key} weight: {model.base_model.vision_model.embeddings.modality_patch_embeddings[key].weight[0][0][0][0]:.7f}", f" | grad: {0 if patch_emb_grad is None else patch_emb_grad.flatten()[0]:.7f}", f" | equal to base: {(model.base_model.vision_model.embeddings.modality_patch_embeddings[key].weight == model.base_model.vision_model.embeddings.patch_embedding.weight).all()}")
+
+            print('\n')
+            """   
 
             total_loss = sum([v for k, v in ret.items() if "loss" in k]) # 计算损失函数 multi_modal_contrastive_loss损失在模型中计算好了, 并且已经成功detach
             

@@ -48,6 +48,9 @@ def get_args():
                              'text uses its own projection (5 total: vis+text+3 shared). '
                              'When False: each modality uses separate embeddings/projections '
                              '(5 total: vis+text+nir+sk+cp).')
+    parser.add_argument('--freeze_embedding_layers', action='store_true', default=False)
+    parser.add_argument('--freeze_projection_layers', action='store_true', default=False)
+
 
     ######################## model general settings ########################
     parser.add_argument("--pretrain_choice", default='ViT-B/16') # whether use pretrained model

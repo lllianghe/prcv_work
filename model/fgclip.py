@@ -34,8 +34,13 @@ class FGCLIPModel(CLIPModel):
     config_class = CLIPConfig
     main_input_name = "text_long"
 
-    def __init__(self, config):
+    def __init__(self, config, args=None):
+        # 存储args以便在from_pretrained中使用
+        self._init_args = args
         super(CLIPModel, self).__init__(config)
+        
+        # 存储args配置以便在其他方法中使用
+        self.args = args
 
         if not isinstance(config.text_config, CLIPTextConfig):
             raise ValueError(
@@ -82,6 +87,15 @@ class FGCLIPModel(CLIPModel):
 
         # Initialize weights and apply final processing
         self.post_init()
+
+    @classmethod
+    def from_pretrained(cls, pretrained_model_name_or_path, args=None, **kwargs):
+        """重写from_pretrained方法以支持args参数传递"""
+        # 调用父类的from_pretrained方法
+        model = super().from_pretrained(pretrained_model_name_or_path, **kwargs)
+        # 设置args属性
+        model.args = args
+        return model
 
     def add_visual_projection(self, modality: str):
         """

@@ -16,6 +16,7 @@
 
 from dataclasses import dataclass
 from typing import Any, Optional, Tuple, Union
+import copy
 
 import torch
 import torch.utils.checkpoint
@@ -201,12 +202,12 @@ class CLIPVisionEmbeddings(nn.Module):
         Args:
             modality (str): 模态名称，如 'vis', 'nir', 'cp', 'sk' 等
         """
-        import copy
         
         if modality in self.modality_patch_embeddings:
             print(f"Warning: Modality '{modality}' already exists. Skipping.")
             return
-            
+        
+        """
         # 创建新的patch_embedding层并深拷贝原始权重
         new_patch_embedding = nn.Conv2d(
             in_channels=self.config.num_channels,
@@ -215,10 +216,13 @@ class CLIPVisionEmbeddings(nn.Module):
             stride=self.patch_size,
             bias=False,
         )
-        
         # 深拷贝原始patch_embedding的权重
         with torch.no_grad():
             new_patch_embedding.weight.copy_(self.patch_embedding.weight.clone())
+        """        
+        # 使用copy.deepcopy()深拷贝整个patch_embedding层
+        new_patch_embedding = copy.deepcopy(self.patch_embedding)
+        
         new_patch_embedding.weight.requires_grad = True
             
         self.modality_patch_embeddings[modality] = new_patch_embedding

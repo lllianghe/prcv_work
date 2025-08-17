@@ -34,6 +34,8 @@ from transformers.utils import (
 from .configuration_clip import CLIPConfig, CLIPTextConfig, CLIPVisionConfig
 # from transformers import CLIPConfig, CLIPTextConfig, CLIPVisionConfig
 from torch.nn import functional as F
+from model.lora import inject_vision_lora
+
 
 logger = logging.get_logger(__name__)
 
@@ -1191,6 +1193,10 @@ class CLIPVisionTransformer(nn.Module):
         self.pre_layrnorm = nn.LayerNorm(embed_dim, eps=config.layer_norm_eps)
         self.encoder = CLIPEncoder(config)
         self.post_layernorm = nn.LayerNorm(embed_dim, eps=config.layer_norm_eps)
+        self.lora_modules = inject_vision_lora(self.encoder)
+        # for lora_module in self.lora_modules:
+        #     self.add_module(lora_module.lora_name, lora_module)
+
 
     @add_start_docstrings_to_model_forward(CLIP_VISION_INPUTS_DOCSTRING)
     @replace_return_docstrings(output_type=BaseModelOutputWithPooling, config_class=CLIPVisionConfig)
@@ -1207,6 +1213,10 @@ class CLIPVisionTransformer(nn.Module):
         Returns:
 
         """
+        
+        # for lora in self.lora_modules:
+        #     lora.apply_to(modality=modality)
+            
         output_attentions = output_attentions if output_attentions is not None else self.config.output_attentions
         output_hidden_states = (
             output_hidden_states if output_hidden_states is not None else self.config.output_hidden_states

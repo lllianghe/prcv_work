@@ -22,6 +22,9 @@ def build_optimizer(args, model):
             weight_decay = args.weight_decay_bias
         if "classifier" in key or "mlm_head" in key:
             lr = args.lr * args.lr_factor
+        if "lora" in key:
+            lr = args.lr * 5
+            weight_decay = 0
         # weight_decay用于l2正则化来防止过拟合
         params += [{"params": [value], "lr": lr, "weight_decay": weight_decay}]
 

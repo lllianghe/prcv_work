@@ -29,6 +29,8 @@ from torch import nn
 import math
 from torchvision.ops import roi_align
 
+import copy
+
 
 class FGCLIPModel(CLIPModel):
     config_class = CLIPConfig
@@ -110,12 +112,16 @@ class FGCLIPModel(CLIPModel):
             print(f"Warning: Modality '{modality}' visual projection already exists. Skipping.")
             return
             
+        """
         # 创建新的visual_projection层并深拷贝原始权重
         new_visual_projection = nn.Linear(self.vision_embed_dim, self.projection_dim, bias=False)
-        
         # 深拷贝原始visual_projection的权重
         with torch.no_grad():
             new_visual_projection.weight.copy_(self.visual_projection.weight.clone())
+        """
+        new_visual_projection = copy.deepcopy(self.visual_projection)
+        
+
         new_visual_projection.weight.requires_grad = True
             
         self.modality_visual_projections[modality] = new_visual_projection

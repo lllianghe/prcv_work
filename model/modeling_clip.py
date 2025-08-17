@@ -208,6 +208,7 @@ class CLIPVisionEmbeddings(nn.Module):
             return
         
         """
+        """
         # 创建新的patch_embedding层并深拷贝原始权重
         new_patch_embedding = nn.Conv2d(
             in_channels=self.config.num_channels,
@@ -219,7 +220,7 @@ class CLIPVisionEmbeddings(nn.Module):
         # 深拷贝原始patch_embedding的权重
         with torch.no_grad():
             new_patch_embedding.weight.copy_(self.patch_embedding.weight.clone())
-        """        
+          
         # 使用copy.deepcopy()深拷贝整个patch_embedding层
         new_patch_embedding = copy.deepcopy(self.patch_embedding)
         

@@ -179,8 +179,11 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description="irra Test")
     # 把对应model的file放这就行了
     parser.add_argument("--config_file", default=
-                              '/SSD_Data01/myf/research/PRCV/fgclip_model/prcv_work/logs/ORBench/20250728_051944_large_fgclip/configs.yaml'
-                    ) 
+    ""
+    ) 
+
+
+
     # parser.add_argument("--config_file", default='logs/ORBench/20250715_021439_irra/configs.yaml') #这是fgclip的模型
     args = parser.parse_args()
     args = load_train_configs(args.config_file)
@@ -196,35 +199,34 @@ if __name__ == '__main__':
     test_gallery_loader = DataLoader(test_gallery_dataset, batch_size=args.test_batch_size, shuffle=False)
     
     model = build_model(args,num_classes=int(400*(1-args.test_size))) #num_class必须和之前构建的model中的num_class对应
-    
     # 根据参数分别控制multimodal embedding和projection层的初始化
     add_embeddings = args.add_multimodal_embeddings or args.add_multimodal_layers
-    add_projections = args.add_multimodal_projections or args.add_multimodal_layers
-    
+    add_projections = args.add_multimodal_projections or args.add_multimodal_layers    
     if add_embeddings:
         # 初始化多模态embedding层
-        if hasattr(model.base_model, 'vision_model'):
-            modalities = ['vis', 'sk', 'nir', 'cp']
-            for modality in modalities:
-                model.base_model.vision_model.embeddings.add_patch_embedding(modality)
-    
+        model.base_model.setup_multi_embeddings()
     if add_projections:
         # 初始化多模态projection层
         model.base_model.setup_multi_projections()
-    
+
     checkpointer = Checkpointer(model)
-    checkpointer.load(f=op.join(args.output_dir, 'best.pth'))
+    checkpointer.load(f=op.join(args.output_dir, 'epoch_800.pth'))
     model.to(device)
     
     # 判断是否使用多模态特征提取（需要同时有embedding和projection）
     use_multimodal = add_embeddings and add_projections
-    
     # 统一使用 embedding_gfeats_with_multiembeddings，它会根据 use_multimodal_layers_in_pairs 参数处理回退逻辑
     gfeats_dict = embedding_gfeats_with_multiembeddings(model, test_gallery_loader, args.use_multimodal_layers_in_pairs if use_multimodal else False)
     print(f"embedding_gfeats_with_multiembeddings success")
     json_file = '/SSD_Data01/PRCV-ReID5o/data/ORBench_PRCV/val/val_queries.json'
     query_type_ranges = get_query_type_idx_range(json_file)
-    output_file=op.join(args.output_dir, 'ranking_list.csv')
+
+
+    
+    output_file=op.join(args.output_dir, 'ranking_list_epoch_800.csv')
+
+
+
     with open(output_file, mode='w', newline='') as csvfile:
         fieldnames = ['query_idx', 'query_type', 'ranking_list_idx']
         writer = csv.DictWriter(csvfile, fieldnames=fieldnames)

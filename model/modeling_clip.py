@@ -1193,9 +1193,13 @@ class CLIPVisionTransformer(nn.Module):
         self.pre_layrnorm = nn.LayerNorm(embed_dim, eps=config.layer_norm_eps)
         self.encoder = CLIPEncoder(config)
         self.post_layernorm = nn.LayerNorm(embed_dim, eps=config.layer_norm_eps)
+
+        """
+        # lora
+        """
         self.lora_modules = inject_vision_lora(self.encoder)
-        # for lora_module in self.lora_modules:
-        #     self.add_module(lora_module.lora_name, lora_module)
+        for lora_module in self.lora_modules:
+            self.add_module(lora_module.lora_name, lora_module)
 
 
     @add_start_docstrings_to_model_forward(CLIP_VISION_INPUTS_DOCSTRING)
@@ -1211,11 +1215,13 @@ class CLIPVisionTransformer(nn.Module):
     ) -> Union[Tuple, BaseModelOutputWithPooling]:
         r"""
         Returns:
-
         """
         
-        # for lora in self.lora_modules:
-        #     lora.apply_to(modality=modality)
+        """
+        lora 切换
+        """
+        for lora in self.lora_modules:
+            lora.apply_to(modality=modality)
             
         output_attentions = output_attentions if output_attentions is not None else self.config.output_attentions
         output_hidden_states = (

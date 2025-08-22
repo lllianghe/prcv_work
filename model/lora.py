@@ -129,7 +129,7 @@ class VisionLoRAModule(torch.nn.Module):
 
 
 
-def inject_vision_lora(model, lora_dim=4, alpha=1.0, dropout=None, rank_dropout=None, module_dropout=None):
+def inject_vision_lora(model, lora_dim=768, alpha=1.0, dropout=None, rank_dropout=None, module_dropout=None):
     """
     递归遍历模型，将所有 Linear 层添加 LoRA。
     返回一个 lora_modules 列表，便于之后管理。

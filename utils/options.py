@@ -72,7 +72,10 @@ def get_args():
     parser.add_argument("--alpha", type=float, default=0.9) # 一阶矩估计的指数衰减率
     parser.add_argument("--beta", type=float, default=0.999) # 一阶矩估计的指数衰减率
     parser.add_argument("--gradient_accumulation_steps", type=int, default=1, help="Number of steps to accumulate gradients before optimizer step")
+    parser.add_argument("--lora_backbone_lr", type=float, default=1e-6, help="Learning rate for backbone layers that have LoRA modules attached")
+    parser.add_argument("--lora_lr", type=float, default=1e-1, help="Learning rate for backbone layers that have LoRA modules attached")
     
+
     ######################## scheduler ########################
     parser.add_argument("--num_epoch", type=int, default=60)
     parser.add_argument("--milestones", type=int, nargs='+', default=(20, 50))

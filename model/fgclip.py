@@ -81,10 +81,12 @@ class FGCLIPModel(CLIPModel):
         # Initialize weights and apply final processing
         self.post_init()
 
+        '''
         # 插入layernorm层
         self.lnmodal_modules = inject_vision_layernorm(self.vision_model)
         for lnmodal_module in self.lnmodal_modules:
             self.add_module(lnmodal_module.lnmodal_name, lnmodal_module)
+        '''
 
     def resize_postion_embeding(self, newsize=248):
 
@@ -146,10 +148,11 @@ class FGCLIPModel(CLIPModel):
         )
         return_dict = return_dict if return_dict is not None else self.config.use_return_dict
 
+        """
         # 注释这几行即可取消ln_modal 切换到对应的模态
         for lnmodal_module in self.lnmodal_modules:
             lnmodal_module.apply_to(modality=modality)
-        
+        """
 
         vision_outputs = self.vision_model(
             pixel_values=pixel_values,

@@ -43,8 +43,8 @@ if __name__ == '__main__':
     
     device = "cuda"
     cur_time = time.strftime("%Y%m%d_%H%M%S", time.localtime())
-    # args.output_dir = op.join(args.output_dir, args.dataset_name, f'{cur_time}_{name}')
-    args.output_dir = op.join(args.output_dir, args.dataset_name, f'base_all_ln_lora')
+    args.output_dir = op.join(args.output_dir, args.dataset_name, f'{cur_time}_{name}')
+    # args.output_dir = op.join(args.output_dir, args.dataset_name, f'base_all_ln_lora')
     logger = setup_logger('IRRA', save_dir=args.output_dir, if_train=args.training, distributed_rank=get_rank())
     logger.info("Using {} GPUs".format(num_gpus))
     logger.info(str(args).replace(',', '\n'))
@@ -121,10 +121,11 @@ if __name__ == '__main__':
                 model.base_model.vision_model.embeddings.add_patch_embedding(modality)
             model.base_model.vision_model.embeddings.patch_embedding.weight.requires_grad = False
 
+            '''
             # 复制layernorm层的值
             for lnmodal_module in model.base_model.lnmodal_modules:
                 lnmodal_module.copy_params_from_org_module()
-
+            '''
             
             model.to(device)
 

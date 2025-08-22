@@ -1,6 +1,6 @@
 DATASET_NAME="ORBench"
 
-CUDA_VISIBLE_DEVICES=7 \
+CUDA_VISIBLE_DEVICES=2 \
 python train.py \
 --batch_size 24 \
 --loss_name 'multi_modal_contrastive+itc' \
@@ -14,11 +14,14 @@ python train.py \
 --dataset_name $DATASET_NAME \
 --name fgclip \
 --root_dir '/SSD_Data01/PRCV-ReID5o/data/' \
---num_epoch 1000 \
---lr 2.4e-5 \
 --warmup_epochs 580 \
 --lrscheduler exp \
 --power 0.5 \
 --step_size 2000 \
 --add_multimodal_layers \
 --img_size 224,224 \
+--num_epoch 1000 \
+--lr 5e-6 \
+--lora_lr 1e-1 \
+--lora_backbone_lr 1e-6 \
+--weight_decay 4e-5 \

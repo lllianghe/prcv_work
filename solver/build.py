@@ -23,8 +23,11 @@ def build_optimizer(args, model):
         if "classifier" in key or "mlm_head" in key:
             lr = args.lr * args.lr_factor
         if "lora" in key:
-            lr = args.lr * 5
+            lr = args.lora_lr
             weight_decay = 0
+        # 为vision encoder中有LoRA模块的原始层设置特定学习率
+        if ("q_proj" in key or "v_proj" in key) and "lora" not in key and "vision_model" in key:
+            lr = args.lora_backbone_lr
         # weight_decay用于l2正则化来防止过拟合
         params += [{"params": [value], "lr": lr, "weight_decay": weight_decay}]
 

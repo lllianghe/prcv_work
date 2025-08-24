@@ -1,7 +1,7 @@
 #!/bin/bash
 DATASET_NAME="ORBench"
 
-CUDA_VISIBLE_DEVICES=0 \
+CUDA_VISIBLE_DEVICES=1 \
 python train.py \
 --name irra \
 --img_aug \
@@ -10,5 +10,5 @@ python train.py \
 --dataset_name $DATASET_NAME \
 --loss_names 'sdm+id' \
 --num_epoch 60 \
---pretrain_choice '/SSD_Data01/zyl/prcv_work/model_cache/fgclip/model.safetensors' \
+--pretrain_choice '/SSD_Data01/zyl/prcv_work/model_cache/fgclip_large/model.safetensors' \
 --root_dir '/SSD_Data01/PRCV-ReID5o/data/'

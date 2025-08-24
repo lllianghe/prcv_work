@@ -11,11 +11,11 @@ export NCCL_DEBUG=WARN
 # export NCCL_DEBUG_SUBSYS=ALL
 # export TORCH_DISTRIBUTED_DEBUG=DETAIL
 
-export CUDA_VISIBLE_DEVICES=7  # assign specific GPU
+export CUDA_VISIBLE_DEVICES=3  # assign specific GPU
 NUM_GPUS=1
 torchrun --nproc_per_node=$NUM_GPUS --master_port=54198 \
 train.py \
---batch_size 12 \
+--batch_size 4 \
 --sampler random \
 --num_instance 5 \
 --loss_name 'multi_modal_contrastive+itc' \

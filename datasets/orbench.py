@@ -5,7 +5,7 @@ import os
 
 from utils.iotools import read_json
 from .bases import BaseDataset
-
+import math
 
 class ORBENCH(BaseDataset):
     """
@@ -40,10 +40,15 @@ class ORBENCH(BaseDataset):
         # 随机打乱所有的 ID
         random.shuffle(all_ids)
         id_num = len(all_ids)
-        train_size = int(len(all_ids)*(1-test_size))
-        train_ids = set(all_ids[:train_size])
-        test_ids = set(all_ids[train_size:id_num])
-        val_ids = set(all_ids[id_num:])  # 可以根据需要调整验证集的分配
+        if math.isclose(test_size, 200 / 600, rel_tol=1e-2):
+            train_ids = set(item['id'] for item in annos if item['split'] == 'train')
+            test_ids = set(item['id'] for item in annos if item['split'] == 'val')
+            val_ids = set()
+        else:
+            train_size = round(len(all_ids)*(1-test_size))
+            train_ids = set(all_ids[:train_size])
+            test_ids = set(all_ids[train_size:id_num])
+            val_ids = set(all_ids[id_num:])  # 可以根据需要调整验证集的分配
         for anno in annos:
             if anno['id'] in train_ids:
                 train_annos.append(anno)

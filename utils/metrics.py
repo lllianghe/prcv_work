@@ -4,6 +4,8 @@ import numpy as np
 import os
 import torch.nn.functional as F
 import logging
+from .re_ranking import fast_gcrv_image
+from .cmc import ReRank
 
 
 def rank(similarity, q_pids, g_pids, max_rank=10, get_mAP=True):
@@ -34,6 +36,41 @@ def rank(similarity, q_pids, g_pids, max_rank=10, get_mAP=True):
     tmp_cmc = [tmp_cmc[:, i] / (i + 1.0) for i in range(tmp_cmc.shape[1])]
     tmp_cmc = torch.stack(tmp_cmc, 1) * matches
     AP = tmp_cmc.sum(1) / num_rel  # q
+    mAP = AP.mean() * 100
+
+    return all_cmc, mAP, mINP, indices
+
+
+def rank_with_distance(dist_matrix, q_pids, g_pids, max_rank=10, get_mAP=True):
+    """使用距离矩阵进行排序和评估"""
+    indices = np.argsort(dist_matrix, axis=1)  # 距离矩阵，升序排列
+    pred_labels = g_pids[indices][:, :max_rank]  # q * k
+    matches = (pred_labels == q_pids.reshape(-1, 1))  # q * k
+
+    all_cmc = np.cumsum(matches, axis=1)
+    all_cmc[all_cmc > 1] = 1
+    all_cmc = all_cmc.astype(np.float32).mean(0) * 100
+
+    if not get_mAP:
+        return all_cmc, indices
+
+    num_rel = matches.sum(1)  # q
+    tmp_cmc = np.cumsum(matches, axis=1)  # q * k
+
+    inp = []
+    for i, match_row in enumerate(matches):
+        match_indices = np.where(match_row)[0]
+        if len(match_indices) > 0:
+            inp.append(tmp_cmc[i][match_indices[-1]] / (match_indices[-1] + 1.))
+        else:
+            inp.append(0.)
+    mINP = np.mean(inp) * 100
+
+    tmp_cmc_norm = np.zeros_like(tmp_cmc, dtype=np.float32)
+    for i in range(tmp_cmc.shape[1]):
+        tmp_cmc_norm[:, i] = tmp_cmc[:, i] / (i + 1.0)
+    tmp_cmc_norm = tmp_cmc_norm * matches
+    AP = tmp_cmc_norm.sum(1) / np.maximum(num_rel, 1e-8)  # q
     mAP = AP.mean() * 100
 
     return all_cmc, mAP, mINP, indices
@@ -168,7 +205,12 @@ class Evaluator_OR():
 
         return qfeats_dict, gfeats_dict, qids, gids
     
-    def eval(self, model, i2t_metric=False, modalities=["onemodal_SK", "onemodal_NIR", "onemodal_CP", "onemodal_TEXT", '' ,"twomodal_SK_NIR", "twomodal_SK_CP","twomodal_SK_TEXT", "twomodal_NIR_CP", "twomodal_NIR_TEXT", "twomodal_CP_TEXT", '', "threemodal_SK_NIR_CP", "threemodal_SK_NIR_TEXT", "threemodal_SK_CP_TEXT", "threemodal_NIR_CP_TEXT", '', "fourmodal_SK_TEXT_CP_NIR"]):
+    def eval(self, model, i2t_metric=False, rerank_method=None, rerank_cfg=None, modalities=["onemodal_SK", "onemodal_NIR", "onemodal_CP", "onemodal_TEXT", '' ,"twomodal_SK_NIR", "twomodal_SK_CP","twomodal_SK_TEXT", "twomodal_NIR_CP", "twomodal_NIR_TEXT", "twomodal_CP_TEXT", '', "threemodal_SK_NIR_CP", "threemodal_SK_NIR_TEXT", "threemodal_SK_CP_TEXT", "threemodal_NIR_CP_TEXT", '', "fourmodal_SK_TEXT_CP_NIR"]):
+        """
+        Args:
+            rerank_method: None, 'rerank', 'gcr' - 选择重排序方法
+            rerank_cfg: 重排序配置参数
+        """
         
         if len(self.img_loader)==0:
             print("No data! Skip Evaluating.\n")
@@ -205,29 +247,72 @@ class Evaluator_OR():
             qfeats = F.normalize(qfeats, p=2, dim=1)  # text features (query)
             gfeats = F.normalize(gfeats, p=2, dim=1)  # image features (gallery)
 
-            # Calculate similarity
-            similarity = qfeats @ gfeats.t()
-
-            # Rank and get metrics
-            t2i_cmc, t2i_mAP, t2i_mINP, _ = rank(similarity=similarity, q_pids=qids, g_pids=gids, max_rank=10, get_mAP=True)
-            t2i_cmc, t2i_mAP, t2i_mINP = t2i_cmc.numpy(), t2i_mAP.numpy(), t2i_mINP.numpy()
+            # Apply re-ranking if specified
+            if rerank_method is None:
+                # Original similarity-based ranking
+                similarity = qfeats @ gfeats.t()
+                t2i_cmc, t2i_mAP, t2i_mINP, _ = rank(similarity=similarity, q_pids=qids, g_pids=gids, max_rank=10, get_mAP=True)
+                t2i_cmc, t2i_mAP, t2i_mINP = t2i_cmc.numpy(), t2i_mAP.numpy(), t2i_mINP.numpy()
+            elif rerank_method == 'rerank':
+                # K-reciprocal re-ranking
+                k1 = rerank_cfg.get('k1', 20) if rerank_cfg else 20
+                k2 = rerank_cfg.get('k2', 6) if rerank_cfg else 6
+                lambda_value = rerank_cfg.get('lambda_value', 0.3) if rerank_cfg else 0.3
+                
+                self.logger.info(f"Applying k-reciprocal re-ranking for {modality_strategy} with k1={k1}, k2={k2}, lambda={lambda_value}")
+                dist_matrix = ReRank(qfeats.cpu().numpy(), gfeats.cpu().numpy(), k1=k1, k2=k2, lambda_value=lambda_value)
+                t2i_cmc, t2i_mAP, t2i_mINP, _ = rank_with_distance(dist_matrix, qids.cpu().numpy(), gids.cpu().numpy(), max_rank=10, get_mAP=True)
+            elif rerank_method == 'gcr':
+                # GCR re-ranking
+                if rerank_cfg is None:
+                    self.logger.error("GCR configuration is required for GCR re-ranking")
+                    continue
+                
+                self.logger.info(f"Applying GCR re-ranking for {modality_strategy}")
+                # 准备GCR需要的数据格式
+                qids_np = qids.cpu().numpy()
+                gids_np = gids.cpu().numpy()
+                qfeats_np = qfeats.cpu()
+                gfeats_np = gfeats.cpu()
+                
+                # 创建伪tracks（如果不需要可以设为0）
+                qids_tracks = np.zeros_like(qids_np)
+                gids_tracks = np.zeros_like(gids_np)
+                
+                all_data = [qfeats_np, qids_np, qids_tracks, gfeats_np, gids_np, gids_tracks]
+                dist_matrix, _, _ = fast_gcrv_image(rerank_cfg, all_data)
+                t2i_cmc, t2i_mAP, t2i_mINP, _ = rank_with_distance(dist_matrix, qids_np, gids_np, max_rank=10, get_mAP=True)
             
             all_r1s.append(t2i_cmc[0])
             all_mAPs.append(t2i_mAP)
 
             # Add to table
-            result_rows.append([modality_strategy, t2i_cmc[0], t2i_cmc[4], t2i_cmc[9], t2i_mAP, t2i_mINP])
-
+            task_name = f"{modality_strategy}" + (f"_{rerank_method}" if rerank_method else "")
+            result_rows.append([task_name, t2i_cmc[0], t2i_cmc[4], t2i_cmc[9], t2i_mAP, t2i_mINP])
 
             if i2t_metric:
-                i2t_cmc, i2t_mAP, i2t_mINP, _ = rank(similarity=similarity.t(), q_pids=gids, g_pids=qids, max_rank=10, get_mAP=True)
-                i2t_cmc, i2t_mAP, i2t_mINP = i2t_cmc.numpy(), i2t_mAP.numpy(), i2t_mINP.numpy()
-                result_rows.append([f'i2t_{modality_strategy}', i2t_cmc[0], i2t_cmc[4], i2t_cmc[9], i2t_mAP, i2t_mINP])
+                if rerank_method is None:
+                    similarity = qfeats @ gfeats.t()
+                    i2t_cmc, i2t_mAP, i2t_mINP, _ = rank(similarity=similarity.t(), q_pids=gids, g_pids=qids, max_rank=10, get_mAP=True)
+                    i2t_cmc, i2t_mAP, i2t_mINP = i2t_cmc.numpy(), i2t_mAP.numpy(), i2t_mINP.numpy()
+                elif rerank_method == 'rerank':
+                    # For i2t, swap query and gallery
+                    dist_matrix_i2t = ReRank(gfeats.cpu().numpy(), qfeats.cpu().numpy(), k1=k1, k2=k2, lambda_value=lambda_value)
+                    i2t_cmc, i2t_mAP, i2t_mINP, _ = rank_with_distance(dist_matrix_i2t, gids.cpu().numpy(), qids.cpu().numpy(), max_rank=10, get_mAP=True)
+                elif rerank_method == 'gcr':
+                    # For i2t, swap query and gallery
+                    all_data_i2t = [gfeats_np, gids_np, gids_tracks, qfeats_np, qids_np, qids_tracks]
+                    dist_matrix_i2t, _, _ = fast_gcrv_image(rerank_cfg, all_data_i2t)
+                    i2t_cmc, i2t_mAP, i2t_mINP, _ = rank_with_distance(dist_matrix_i2t, gids_np, qids_np, max_rank=10, get_mAP=True)
+                
+                i2t_task_name = f'i2t_{modality_strategy}' + (f"_{rerank_method}" if rerank_method else "")
+                result_rows.append([i2t_task_name, i2t_cmc[0], i2t_cmc[4], i2t_cmc[9], i2t_mAP, i2t_mINP])
 
         table = PrettyTable(["task", "R1", "R5", "R10", "mAP", "mINP"])
         avg_r1 = np.mean(all_r1s)
         avg_mAP = np.mean(all_mAPs)
-        table.add_row(['Average', avg_r1, '-', '-', avg_mAP, '-'])
+        avg_task_name = f'Average' + (f"_{rerank_method}" if rerank_method else "")
+        table.add_row([avg_task_name, avg_r1, '-', '-', avg_mAP, '-'])
         table.add_row([''] * 6)
 
         for row in result_rows:

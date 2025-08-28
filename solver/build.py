@@ -8,6 +8,11 @@ def build_optimizer(args, model):
 
     print(f'Using {args.lr_factor} times learning rate for random init module ')
     
+    # 检查是否启用了多模态projection层
+    add_projections = getattr(args, 'add_multimodal_projections', False) or getattr(args, 'add_multimodal_layers', False)
+    if add_projections:
+        print(f'Using 4x learning rate for projection layers when add_multimodal_projections is enabled')
+    
     for key, value in model.named_parameters():
         if not value.requires_grad:
             continue
@@ -22,6 +27,15 @@ def build_optimizer(args, model):
             weight_decay = args.weight_decay_bias
         if "classifier" in key or "mlm_head" in key:
             lr = args.lr * args.lr_factor
+        
+        """
+        # 当启用add_multimodal_projections或add_multimodal_layers时，为特定的projection层设置4倍学习率
+        if add_projections:
+            # 只针对fgclip.py中定义的特定projection层：text_projection和modality_visual_projections
+            if ("text_projection" in key or "modality_visual_projections" in key):
+                lr = args.lr * 4.0  # 将特定projection层学习率提高4倍
+                print(f"Setting FGCLIPModel projection layer '{key}' learning rate to {lr} (4x base rate)")
+        """
         # weight_decay用于l2正则化来防止过拟合
         params += [{"params": [value], "lr": lr, "weight_decay": weight_decay}]
 

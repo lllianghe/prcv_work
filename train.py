@@ -76,10 +76,25 @@ if __name__ == '__main__':
     
 
     start_epoch = 1
+    
+    # 根据参数分别控制multimodal embedding和projection层的初始化
+    add_embeddings = args.add_multimodal_embeddings or args.add_multimodal_layers
+    add_projections = args.add_multimodal_projections or args.add_multimodal_layers
+    
     # 统一的检查点加载逻辑
     if args.resume:
         logger.info(f"Loading checkpoint from {args.resume_ckpt_file}")
-        if not args.add_multimodal_layers:
+        # 检查是否需要严格模式
+        # 严格模式条件：不需要添加任何多模态层，或者需要的层都已经存在
+        has_multimodal_embeddings = hasattr(model.base_model, 'vision_model') and hasattr(model.base_model.vision_model.embeddings, 'modality_patch_embeddings') and model.base_model.vision_model.embeddings.modality_patch_embeddings
+        has_multimodal_projections = hasattr(model.base_model, 'modality_visual_projections') and model.base_model.modality_visual_projections
+        
+        # 使用严格模式的条件：需要的层都已经存在
+        # 对于每个层：要么不需要添加，要么已经存在
+        need_strict_mode = (not add_embeddings or has_multimodal_embeddings) and \
+                          (not add_projections or has_multimodal_projections)
+        
+        if need_strict_mode:
             # 严格模式：用于多模态检查点
             checkpoint = checkpointer.resume(args.resume_ckpt_file, strict=True)
             logger.info("Using strict loading mode for multimodal checkpoint")
@@ -103,23 +118,76 @@ if __name__ == '__main__':
             # 重置训练起始epoch为1，忽略checkpoint中的epoch信息
             logger.info("Optimizer, scheduler have been reset to use new parameters")
             
-            # 自动添加多模态embedding层
-            if hasattr(model.base_model, 'vision_model'):
-                logger.info("Automatically adding multimodal embedding layers for single-modal checkpoint")
-                modalities = ['vis', 'sk', 'nir', 'cp']
-                for modality in modalities:
-                    model.base_model.vision_model.embeddings.add_patch_embedding(modality)
-                model.base_model.vision_model.embeddings.patch_embedding.weight.requires_grad = False
-                model.to(device)
+            
+            use_pairs = getattr(args, 'use_multimodal_layers_in_pairs', True)
+            logger.info(f"Setting up multimodal layers with use_pairs={use_pairs}")
+            
+            if add_embeddings and not has_multimodal_embeddings:
+                if hasattr(model.base_model, 'setup_multi_embeddings'):
+                    model.base_model.setup_multi_embeddings(use_pairs=use_pairs)
+                    logger.info(f"Setup multi embeddings with use_pairs={use_pairs}")
+                else:
+                    logger.warning("base_model does not support setup_multi_embeddings")
+            
+            if add_projections and not has_multimodal_projections:
+                if hasattr(model.base_model, 'setup_multi_projections'):
+                    model.base_model.setup_multi_projections(use_pairs=use_pairs)
+                    logger.info(f"Setup multi projections with use_pairs={use_pairs}")
+                else:
+                    logger.warning("base_model does not support setup_multi_projections")
+            model.to(device)
+            # 多模态层已在checkpointer.load之前统一设置
+            logger.info("Multimodal layers were set up before checkpoint loading")
     else:
         logger.info("Start training without loading checkpoint")
-        if args.add_multimodal_layers:
-            logger.info("Manually adding multimodal embedding layers")
-            modalities = ['vis', 'sk', 'nir', 'cp']
-            for modality in modalities:
-                model.base_model.vision_model.embeddings.add_patch_embedding(modality)
-            model.base_model.vision_model.embeddings.patch_embedding.weight.requires_grad = False
-            model.to(device)
+            
+        if add_embeddings or add_projections:
+            use_pairs = getattr(args, 'use_multimodal_layers_in_pairs', True)
+            logger.info(f"Setting up multimodal layers with use_pairs={use_pairs}")
+            
+            if add_embeddings:
+                if hasattr(model.base_model, 'setup_multi_embeddings'):
+                    model.base_model.setup_multi_embeddings(use_pairs=use_pairs)
+                    logger.info(f"Setup multi embeddings with use_pairs={use_pairs}")
+                else:
+                    logger.warning("base_model does not support setup_multi_embeddings")
+            
+            if add_projections:
+                if hasattr(model.base_model, 'setup_multi_projections'):
+                    model.base_model.setup_multi_projections(use_pairs=use_pairs)
+                    logger.info(f"Setup multi projections with use_pairs={use_pairs}")
+                else:
+                    logger.warning("base_model does not support setup_multi_projections")
+    
+    # 检查是否添加了新层，如果是则重新构建优化器
+    if add_embeddings or add_projections:
+        logger.info("检测到新添加的多模态层，重新构建优化器...")
+        
+        # 重新构建优化器和调度器
+        optimizer = build_optimizer(args, model)
+        scheduler = build_lr_scheduler(args, optimizer)
+        
+        # 重新创建checkpointer
+        checkpointer = Checkpointer(model, optimizer, scheduler, args.output_dir, is_master)
+        
+        logger.info(f"优化器已更新，包含 {sum(len(group['params']) for group in optimizer.param_groups)} 个参数组")
+    
+    model.base_model.vision_model.embeddings.patch_embedding.weight.requires_grad = not(args.freeze_embedding_layers)
+    for keys, values in model.base_model.vision_model.embeddings.modality_patch_embeddings.items():
+        model.base_model.vision_model.embeddings.modality_patch_embeddings[keys].weight.requires_grad = not(args.freeze_embedding_layers)
+    
+    model.base_model.visual_projection.weight.requires_grad = not(args.freeze_projection_layers)
+    for keys, values in model.base_model.modality_visual_projections.items():
+        model.base_model.modality_visual_projections[keys].weight.requires_grad = not(args.freeze_projection_layers)
+    
+    model.to(device)
+
+
+
+
+
+
+
 
     if args.dataset_name == 'ORBench':
         evaluator = Evaluator_OR(val_img_loader, val_txt_loader) # 用于评估检索性能的类

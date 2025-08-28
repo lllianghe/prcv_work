@@ -167,6 +167,11 @@ def do_train(start_epoch, args, model, train_loader, evaluator, optimizer,
     tb_writer = SummaryWriter(log_dir=args.output_dir)
 
     best_mAP = 0.0
+    best_sk_mAP = 0.0
+    best_nir_mAP = 0.0
+    best_cp_mAP = 0.0
+    best_text_mAP = 0.0
+    best_singlemodal_mAP = 0.0
 
     # Lists to store metrics for plotting
     train_loss_list = []
@@ -231,7 +236,27 @@ def do_train(start_epoch, args, model, train_loader, evaluator, optimizer,
             if accumulation_count == 0:
                 optimizer.zero_grad()
 
+            """
+            # 验证种子是否受到影响
+            print(f"{batch['pids'][0]}")
+            """
+
             ret = model(batch,scaler)
+            
+            """
+            # 验证模型权重是否更新
+            print(f"projection_layer of base weight: {model.base_model.visual_projection.weight[0][0]:.7f}", f" | grad: {0 if model.base_model.visual_projection.weight.grad is None else model.base_model.visual_projection.weight.grad.flatten()[0]:.7f}")
+            for key, value in model.base_model.modality_visual_projections.items():
+                vis_grad = model.base_model.modality_visual_projections[key].weight.grad
+                print(f"projection_layer of {key} weight: {model.base_model.modality_visual_projections[key].weight[0][0]:.7f}", f" | grad: {0 if vis_grad is None else vis_grad.flatten()[0]:.7f}", f" | equal to base: {(model.base_model.modality_visual_projections[key].weight == model.base_model.visual_projection.weight).all()}")
+            
+            print(f"patch_embedding_layer of base weight: {model.base_model.vision_model.embeddings.patch_embedding.weight[0][0][0][0]:.7f}", f" | grad: {0 if model.base_model.vision_model.embeddings.patch_embedding.weight.grad is None else model.base_model.vision_model.embeddings.patch_embedding.weight.grad.flatten()[0]:.7f}")
+            for key, value in model.base_model.vision_model.embeddings.modality_patch_embeddings.items():
+                patch_emb_grad = model.base_model.vision_model.embeddings.modality_patch_embeddings[key].weight.grad
+                print(f"patch_embedding_layer of {key} weight: {model.base_model.vision_model.embeddings.modality_patch_embeddings[key].weight[0][0][0][0]:.7f}", f" | grad: {0 if patch_emb_grad is None else patch_emb_grad.flatten()[0]:.7f}", f" | equal to base: {(model.base_model.vision_model.embeddings.modality_patch_embeddings[key].weight == model.base_model.vision_model.embeddings.patch_embedding.weight).all()}")
+
+            print('\n')
+            """   
 
             total_loss = sum([v for k, v in ret.items() if "loss" in k]) # 计算损失函数 multi_modal_contrastive_loss损失在模型中计算好了, 并且已经成功detach
             
@@ -368,11 +393,36 @@ def do_train(start_epoch, args, model, train_loader, evaluator, optimizer,
                 plot_and_save_curves(args.output_dir, len(train_loader), train_loss_list, mAP_list, lr_list, log_period, eval_iters_list, eval_epoch_list, loss_dict, single_modal_mAPs_history)
 
                 torch.cuda.empty_cache()
+                if (epoch >=500) and (epoch % 100 == 0):
+                    checkpointer.save(f"epoch_{epoch}", **arguments)
+                    print(f"save epoch {epoch}")
+
                 if best_mAP < mAP:
                     best_mAP = mAP
                     arguments["best_mAP_epoch"] = epoch
-                    checkpointer.save("best", **arguments)
+                    # checkpointer.save("best", **arguments)
+                if best_singlemodal_mAP < (single_modal_mAPs['SK']+single_modal_mAPs['NIR']+single_modal_mAPs['CP']+single_modal_mAPs['TEXT'])/4:
+                    best_singlemodal_mAP = (single_modal_mAPs['SK']+single_modal_mAPs['NIR']+single_modal_mAPs['CP']+single_modal_mAPs['TEXT'])/4
+                    arguments["best_singlemodal_mAP_epoch"] = epoch
+                    # checkpointer.save("best_singlemodal", **arguments)
+                if best_sk_mAP < single_modal_mAPs['SK']:
+                    best_sk_mAP = single_modal_mAPs['SK']
+                    arguments["best_sk_mAP_epoch"] = epoch
+                if best_nir_mAP < single_modal_mAPs['NIR']:
+                    best_nir_mAP = single_modal_mAPs['NIR']
+                    arguments["best_nir_mAP_epoch"] = epoch
+                if best_cp_mAP < single_modal_mAPs['CP']:
+                    best_cp_mAP = single_modal_mAPs['CP']
+                    arguments["best_cp_mAP_epoch"] = epoch
+                if best_text_mAP < single_modal_mAPs['TEXT']:
+                    best_text_mAP = single_modal_mAPs['TEXT']
+                    arguments["best_text_mAP_epoch"] = epoch
                 logger.info(f"best mAP: {best_mAP} at epoch {arguments['best_mAP_epoch']}")
+                logger.info(f"best singlemodal mAP: {best_singlemodal_mAP} at epoch {arguments['best_singlemodal_mAP_epoch']} | current singlemodal mAP: { (single_modal_mAPs['SK']+single_modal_mAPs['NIR']+single_modal_mAPs['CP']+single_modal_mAPs['TEXT'])/4}")
+                logger.info(f"best sk mAP: {best_sk_mAP} at epoch {arguments['best_sk_mAP_epoch']}")
+                logger.info(f"best nir mAP: {best_nir_mAP} at epoch {arguments['best_nir_mAP_epoch']}")
+                logger.info(f"best cp mAP: {best_cp_mAP} at epoch {arguments['best_cp_mAP_epoch']}")
+                logger.info(f"best text mAP: {best_text_mAP} at epoch {arguments['best_text_mAP_epoch']}")
 
 
 def do_inference(model, test_img_loader, test_txt_loader):

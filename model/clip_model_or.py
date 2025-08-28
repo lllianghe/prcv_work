@@ -495,7 +495,7 @@ def convert_weights(model: nn.Module):
     model.apply(_convert_weights_to_fp16)
 
 
-def build_CLIP_from_openai_pretrained(name: str, image_size: Union[int, Tuple[int, int]], stride_size: int, jit: bool = False, download_root: str = None):
+def build_CLIP_from_openai_pretrained(name: str, image_size: Union[int, Tuple[int, int]], stride_size: int, jit: bool = False, download_root: str = None, args=None):
     """Load a CLIP model
 
     Parameters
@@ -531,7 +531,7 @@ def build_CLIP_from_openai_pretrained(name: str, image_size: Union[int, Tuple[in
             state_dict = None
             from .fgclip import FGCLIPModel
             model_folder = os.path.dirname(model_path)
-            model = FGCLIPModel.from_pretrained(model_folder)
+            model = FGCLIPModel.from_pretrained(model_folder, args=args)
         except Exception as e:
             raise RuntimeError(f"Failed to load safetensors file {model_path}: {e}")
         

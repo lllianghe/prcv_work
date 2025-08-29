@@ -417,7 +417,7 @@ if __name__ == '__main__':
         model.base_model.setup_multi_projections()
 
     checkpointer = Checkpointer(model)
-    checkpointer.load(f=op.join(args.output_dir, 'epoch_800.pth'))
+    checkpointer.load(f=op.join(args.output_dir, 'best.pth'))
     model.to(device)
     
     # 判断是否使用多模态特征提取（需要同时有embedding和projection）

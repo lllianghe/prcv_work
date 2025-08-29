@@ -372,16 +372,20 @@ def do_train(start_epoch, args, model, train_loader, evaluator, optimizer,
             if get_rank() == 0:
                 logger.info("Validation Results - Epoch: {}".format(epoch))
 
-            if args.distributed:
-                model_for_eval = model.module.eval()
-            else:
-                model_for_eval = model.eval()
-            
-            # 直接调用eval，内部会自动使用重排序
-            if args.dataset_name == 'ORBench':
-                r1, mAP, single_modal_mAPs = evaluator.eval(model_for_eval)
-            else:
-                r1, mAP = evaluator.eval(model_for_eval)
+                if args.distributed:
+                    model_for_eval = model.module.eval()
+                else:
+                    model_for_eval = model.eval()
+                
+                # 直接调用eval，内部会自动使用重排序
+                if args.dataset_name == 'ORBench':
+                    r1, mAP, single_modal_mAPs = evaluator.eval(model_for_eval)
+                else:
+                    r1, mAP = evaluator.eval(model_for_eval)
+                
+                # 记录epoch和mAP
+                eval_epoch_list.append(epoch)
+                mAP_list.append(mAP)
                 
                 # 记录单模态mAP
                 for modal_name in ['SK', 'NIR', 'CP', 'TEXT']:
@@ -393,7 +397,7 @@ def do_train(start_epoch, args, model, train_loader, evaluator, optimizer,
                 plot_and_save_curves(args.output_dir, len(train_loader), train_loss_list, mAP_list, lr_list, log_period, eval_iters_list, eval_epoch_list, loss_dict, single_modal_mAPs_history)
 
                 torch.cuda.empty_cache()
-                if (epoch >=500) and (epoch % 100 == 0):
+                if (epoch >=600) and (epoch % 200 == 0):
                     checkpointer.save(f"epoch_{epoch}", **arguments)
                     print(f"save epoch {epoch}")
 

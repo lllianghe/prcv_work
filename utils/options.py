@@ -62,7 +62,13 @@ def get_args():
     parser.add_argument("--masked_token_rate", type=float, default=0.8, help="masked token rate for mlm task")
     parser.add_argument("--masked_token_unchanged_rate", type=float, default=0.1, help="masked token unchanged rate")
     parser.add_argument("--lr_factor", type=float, default=5.0, help="lr factor for random init self implement module")
+    parser.add_argument("--lr_moe_frm", type=float, default=1.0, help="learning rate factor for MoE layers")
     parser.add_argument("--MLM", default=False, action='store_true', help="whether to use Mask Language Modeling dataset") #暂时删除mlm功能 下面的loss_names也删了mlm
+
+    ######################## MoE settings ########################
+    parser.add_argument("--moe_num_experts", type=int, default=16, help="number of experts in MoE layer")
+    parser.add_argument("--moe_top_k", type=int, default=6, help="top-k experts to select in MoE layer")
+    parser.add_argument("--moe_aux_loss_weight", type=float, default=1.0, help="auxiliary loss weight for MoE layer")
 
     ######################## loss settings ########################
     parser.add_argument("--loss_names", default='sdm+id', help="which loss to use ['mlm', 'cmpm', 'id', 'itc', 'sdm']")

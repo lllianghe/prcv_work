@@ -22,6 +22,10 @@ def build_optimizer(args, model):
         if "cross" in key:
             # use large learning rate for random initialized cross modal module
             lr =  args.lr * args.lr_factor # default 5.0
+        if "moe" in key.lower():
+            # use specific learning rate for MoE layers
+            lr = args.lr * args.lr_moe_frm
+            print(f"Setting MoE layer '{key}' learning rate to {lr} ({args.lr_moe_frm}x base rate)")
         if "bias" in key:
             lr = args.lr * args.bias_lr_factor
             weight_decay = args.weight_decay_bias

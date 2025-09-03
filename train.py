@@ -58,6 +58,8 @@ if __name__ == '__main__':
     
     model.to(device)
     
+    for name, param in model.named_parameters():
+        logger.info(f"Parameter:{name}.Requires_Grad:{param.requires_grad}")
 
     if args.distributed:
         model = torch.nn.parallel.DistributedDataParallel(

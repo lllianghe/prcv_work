@@ -18,7 +18,7 @@ python train.py \
 --dataset_name $DATASET_NAME \
 --name fgclip_projection_lr \
 --root_dir '/SSD_Data01/PRCV-ReID5o/data/' \
---num_epoch 1000 \
+--num_epoch 700 \
 --lr 2.4e-5 \
 --warmup_epochs 580 \
 --lrscheduler exp \

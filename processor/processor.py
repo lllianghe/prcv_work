@@ -159,6 +159,7 @@ def do_train(start_epoch, args, model, train_loader, evaluator, optimizer,
         "itc_loss": AverageMeter(),
         "id_loss": AverageMeter(),
         "mlm_loss": AverageMeter(),
+        "aux_loss": AverageMeter(),
         "img_acc": AverageMeter(),
         "txt_acc": AverageMeter(),
         "mlm_acc": AverageMeter()
@@ -196,7 +197,8 @@ def do_train(start_epoch, args, model, train_loader, evaluator, optimizer,
         'sdm_loss': [],
         'itc_loss': [],
         'id_loss': [],
-        'mlm_loss': []
+        'mlm_loss': [],
+        'aux_loss': []
     }
     
     # 记录单模态mAP历史
@@ -216,6 +218,9 @@ def do_train(start_epoch, args, model, train_loader, evaluator, optimizer,
     autocast_dtype = args.autocast_dtype
     use_scaler = autocast_dtype == torch.float16
     scaler = GradScaler() if use_scaler else None
+    
+    # 累积门控信息字典
+    accumulated_gate_info = {}
 
     # train
     for epoch in range(start_epoch, num_epoch + 1):
@@ -242,6 +247,43 @@ def do_train(start_epoch, args, model, train_loader, evaluator, optimizer,
             """
 
             ret = model(batch,scaler)
+            
+            # 累积门控信息
+            gate_info_keys = [k for k in ret.keys() if 'gate_info' in k]
+            for gate_key in gate_info_keys:
+                if gate_key not in accumulated_gate_info:
+                    accumulated_gate_info[gate_key] = {'count': 0, 'data': {}}
+                
+                gate_data = ret[gate_key]
+                accumulated_gate_info[gate_key]['count'] += 1
+                
+                # 累积RGB门控信息
+                if 'rgb_gate_info' in gate_data:
+                    rgb_info = gate_data['rgb_gate_info']
+                    if 'rgb_gate_info' not in accumulated_gate_info[gate_key]['data']:
+                         accumulated_gate_info[gate_key]['data']['rgb_gate_info'] = {
+                             'temperature_sum': rgb_info['temperature'],
+                             'expert_usage_sum': rgb_info['expert_usage'].clone().float(),
+                             'gate_probs_mean_sum': rgb_info['gate_probs_mean'].clone().float()
+                         }
+                    else:
+                        accumulated_gate_info[gate_key]['data']['rgb_gate_info']['temperature_sum'] += rgb_info['temperature']
+                        accumulated_gate_info[gate_key]['data']['rgb_gate_info']['expert_usage_sum'] += rgb_info['expert_usage'].float()
+                        accumulated_gate_info[gate_key]['data']['rgb_gate_info']['gate_probs_mean_sum'] += rgb_info['gate_probs_mean'].float()
+                
+                # 累积Query门控信息
+                if 'query_gate_info' in gate_data:
+                    query_info = gate_data['query_gate_info']
+                    if 'query_gate_info' not in accumulated_gate_info[gate_key]['data']:
+                         accumulated_gate_info[gate_key]['data']['query_gate_info'] = {
+                             'temperature_sum': query_info['temperature'],
+                             'expert_usage_sum': query_info['expert_usage'].clone().float(),
+                             'gate_probs_mean_sum': query_info['gate_probs_mean'].clone().float()
+                         }
+                    else:
+                        accumulated_gate_info[gate_key]['data']['query_gate_info']['temperature_sum'] += query_info['temperature']
+                        accumulated_gate_info[gate_key]['data']['query_gate_info']['expert_usage_sum'] += query_info['expert_usage'].float()
+                        accumulated_gate_info[gate_key]['data']['query_gate_info']['gate_probs_mean_sum'] += query_info['gate_probs_mean'].float()
             
             """
             # 验证模型权重是否更新
@@ -281,6 +323,7 @@ def do_train(start_epoch, args, model, train_loader, evaluator, optimizer,
             meters['itc_loss'].update(ret.get('itc_loss', 0), batch_size)
             meters['id_loss'].update(ret.get('id_loss', 0), batch_size)
             meters['mlm_loss'].update(ret.get('mlm_loss', 0), batch_size)
+            meters['aux_loss'].update(ret.get('nir_itc_aux_Loss', 0)+ret.get('cp_itc_aux_Loss', 0)+ret.get('sk_itc_aux_Loss', 0)+ret.get('text_itc_aux_Loss', 0), batch_size)
 
             meters['img_acc'].update(ret.get('img_acc', 0), batch_size)
             meters['txt_acc'].update(ret.get('txt_acc', 0), batch_size)
@@ -325,7 +368,8 @@ def do_train(start_epoch, args, model, train_loader, evaluator, optimizer,
                     'sdm_loss': 'sdm_loss',
                     'itc_loss': 'itc_loss',
                     'id_loss': 'id_loss',
-                    'mlm_loss': 'mlm_loss'
+                    'mlm_loss': 'mlm_loss',
+                    'aux_loss': 'aux_loss'
                 }
                 
                 for loss_name, meter_key in loss_mapping.items():
@@ -343,6 +387,38 @@ def do_train(start_epoch, args, model, train_loader, evaluator, optimizer,
                         info_str += f", {k}: {v.avg:.4f}"
                 info_str += f", Base Lr: {scheduler.get_lr()[0]:.2e}"
                 logger.info(info_str)
+                
+                # Log accumulated MoE gate information
+                if accumulated_gate_info:
+                    logger.info("=== Accumulated MoE Gate Information ===")
+                    for gate_key, gate_data in accumulated_gate_info.items():
+                        modal_name = gate_key.replace('_gate_info', '')
+                        count = gate_data['count']
+                        logger.info(f"Modal: {modal_name} (Accumulated over {count} iterations)")
+                        
+                        # Log accumulated RGB gate info
+                        if 'rgb_gate_info' in gate_data['data']:
+                            rgb_info = gate_data['data']['rgb_gate_info']
+                            avg_temperature = rgb_info['temperature_sum'] / count
+                            avg_expert_usage = (rgb_info['expert_usage_sum'] / count).tolist()
+                            avg_gate_probs = (rgb_info['gate_probs_mean_sum'] / count).tolist()
+                            logger.info(f"  RGB - Avg Temperature: {avg_temperature:.4f}")
+                            logger.info(f"  RGB - Avg Expert Usage: {[f'{x:.2f}' for x in avg_expert_usage]}")
+                            logger.info(f"  RGB - Avg Gate Probs Mean: {[f'{x:.2f}' for x in avg_gate_probs]}")
+                        
+                        # Log accumulated Query gate info
+                        if 'query_gate_info' in gate_data['data']:
+                            query_info = gate_data['data']['query_gate_info']
+                            avg_temperature = query_info['temperature_sum'] / count
+                            avg_expert_usage = (query_info['expert_usage_sum'] / count).tolist()
+                            avg_gate_probs = (query_info['gate_probs_mean_sum'] / count).tolist()
+                            logger.info(f"  Query - Avg Temperature: {avg_temperature:.4f}")
+                            logger.info(f"  Query - Avg Expert Usage: {[f'{x:.2f}' for x in avg_expert_usage]}")
+                            logger.info(f"  Query - Avg Gate Probs Mean: {[f'{x:.2f}' for x in avg_gate_probs]}")
+                    logger.info("=== End Accumulated Gate Information ===")
+                    
+                    # 清空累积的门控信息
+                    accumulated_gate_info.clear()
             
             # 只在实际执行optimizer.step()时调度学习率
             if  (n_iter + 1) % (scheduler_period) == 0:

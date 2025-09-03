@@ -11,6 +11,7 @@ import gc
 import random
 
 from torch.amp import autocast,GradScaler
+from .moe_module import PersonReIDMoEProcessor
 
 
 # 主模型
@@ -82,6 +83,18 @@ class IRRA(nn.Module):
 
         # 多模态层设置已移至train.py中checkpointer.load之前
         # 这样可以确保新添加的层能够正确地深拷贝预训练权重
+        
+        # Initialize MoE module for multi-modal feature enhancement with cosine routing
+        # MoE模块用于在模型最后一层输出后进行多模态特征增强，使用余弦路由机制
+        moe_feature_dim = self.base_model.config.projection_dim if self.is_safetensors else self.embed_dim
+        self.moe_processor = PersonReIDMoEProcessor(
+            input_dim=moe_feature_dim,
+            hidden_dim=moe_feature_dim * 2,  # 专家网络隐藏层维度
+            num_experts=args.moe_num_experts,
+            top_k=args.moe_top_k,
+            aux_loss_weight=args.moe_aux_loss_weight,
+        )
+        
 
     def _set_task(self): # 打印任务
         loss_names = self.args.loss_names
@@ -187,8 +200,21 @@ class IRRA(nn.Module):
                                 else:
                                     t_feats_modal = nir_img_feats[:,0,:].float()
                             
+                            # Apply MoE processing to rgb and current query modal features
+                            # 对rgb和当前query模态特征应用MoE处理（使用余弦路由）
+                            i_feats, t_feats_modal, moe_aux_loss, gate_info = self.moe_processor(
+                                i_feats, t_feats_modal
+                            )
+                            
+                            # Store gate information for logging
+                            ret.update({f'{modal_name}_gate_info': gate_info})
+                            
                             # 2.计算原始qg对比学习损失
                             qg_loss = objectives.compute_itc(i_feats, t_feats_modal, logit_scale) / len(query_feats)
+                            # Add MoE auxiliary loss
+                            ret.update({f'{modal_name}_itc_Loss': qg_loss.detach()}) # detach后不带计算图, 大写L避免被计入总损失        
+                            ret.update({f'{modal_name}_itc_aux_Loss': moe_aux_loss.detach()}) # detach后不带计算图, 大写L避免被计入总损失        
+                            qg_loss = qg_loss + moe_aux_loss
                             # qg_loss = 0.8 * qg_loss
 
                         if self.autocast_dtype == torch.float16 and scaler is not None:
@@ -272,7 +298,6 @@ class IRRA(nn.Module):
                             loss = qg_loss + cross_modal_loss
                         '''
                         
-                        ret.update({f'{modal_name}_itc_Loss': qg_loss.detach()}) # detach后不带计算图, 大写L避免被计入总损失        
                         multi_modal_contrastive_itc_loss += qg_loss
                     # multi_modal_contrastive_itc_loss.backward()
                     ret.update({'multi_modal_contrastive_itc_loss': multi_modal_contrastive_itc_loss.detach()})
@@ -331,8 +356,19 @@ class IRRA(nn.Module):
                                 else:
                                     t_feats_modal = nir_img_feats[:,0,:].float()
 
+                            # Apply MoE processing to rgb and current query modal features
+                            # 对rgb和当前query模态特征应用MoE处理（使用余弦路由）
+                            i_feats, t_feats_modal, moe_aux_loss, gate_info = self.moe_processor(
+                                i_feats, t_feats_modal
+                            )
+                            
+                            # Store gate information for logging
+                            ret.update({f'{modal_name}_gate_info': gate_info})
+
                             # 2.计算loss
                             loss = objectives.compute_sdm(i_feats, t_feats_modal, batch['pids'], logit_scale) / len(query_feats)
+                            # Add MoE auxiliary loss
+                            loss = loss + moe_aux_loss
                         ret.update({f'{modal_name}_sdm_Loss': loss.detach()}) # .detach()后不带计算图, 大写L避免被计入总损失
                         # 根据精度类型决定是否使用scaler
                         if self.autocast_dtype == torch.float16 and scaler is not None:
@@ -396,8 +432,19 @@ class IRRA(nn.Module):
                                 else:
                                     t_feats_modal = nir_img_feats[:,0,:].float()
                             
+                            # Apply MoE processing to rgb and current query modal features
+                            # 对rgb和当前query模态特征应用MoE处理（使用余弦路由）
+                            i_feats, t_feats_modal, moe_aux_loss, gate_info = self.moe_processor(
+                                i_feats, t_feats_modal
+                            )
+                            ret.update({f'{modal_name}_gate_info': gate_info})
+                            
                             # 2.计算原始qg对比学习损失
                             qg_loss = objectives.compute_itc(i_feats, t_feats_modal, logit_scale) / len(query_feats)
+                            # Add MoE auxiliary loss
+                            ret.update({f'{modal_name}_itc_Loss': qg_loss.detach()}) # detach后不带计算图, 大写L避免被计入总损失        
+                            ret.update({f'{modal_name}_itc_aux_Loss': moe_aux_loss.detach()}) # detach后不带计算图, 大写L避免被计入总损失        
+                            qg_loss = qg_loss + moe_aux_loss
                             # qg_loss = 0.8 * qg_loss
 
                         if self.autocast_dtype == torch.float16 and scaler is not None:
@@ -482,7 +529,6 @@ class IRRA(nn.Module):
                             loss = qg_loss + cross_modal_loss
                         '''
                         
-                        ret.update({f'{modal_name}_itc_Loss': qg_loss.detach()}) # detach后不带计算图, 大写L避免被计入总损失        
                         multi_modal_contrastive_itc_loss += qg_loss
                     # multi_modal_contrastive_itc_loss.backward()
                     ret.update({'multi_modal_contrastive_itc_loss': multi_modal_contrastive_itc_loss.detach()})
@@ -571,8 +617,33 @@ class IRRA(nn.Module):
                     sk_img_feat = sk_img_feats[:,0,:].float()
                     nir_img_feat = nir_img_feats[:,0,:].float()
                     text_feat = text_feats[torch.arange(text_feats.shape[0]), caption_ids.argmax(dim=-1)].float()
+                
+                # Apply MoE processing to multi-modal features (using cosine routing)
+                # 对多模态特征应用MoE处理（使用余弦路由）- 两两配对处理
+                
+                # Process vis-cp pair
+                vis_img_feat, cp_img_feat, moe_aux_loss_1 = self.moe_processor(
+                    vis_img_feat, cp_img_feat
+                )
+                
+                # Process vis-sk pair (using updated vis features)
+                vis_img_feat, sk_img_feat, moe_aux_loss_2 = self.moe_processor(
+                    vis_img_feat, sk_img_feat
+                )
+                
+                # Process vis-nir pair (using updated vis features)
+                vis_img_feat, nir_img_feat, moe_aux_loss_3 = self.moe_processor(
+                    vis_img_feat, nir_img_feat
+                )
+                
+                # Combine auxiliary losses
+                moe_aux_loss = (moe_aux_loss_1 + moe_aux_loss_2 + moe_aux_loss_3) / 3.0
+                
                 i_feats = vis_img_feat
                 t_feats = (text_feat + cp_img_feat+sk_img_feat+nir_img_feat) * 0.25
+                
+                # Add MoE auxiliary loss to return dict
+                ret.update({'moe_aux_loss': moe_aux_loss})
         else:
             if self.args.dataset_name == 'ORBench':
                 vis_images = batch['vis_images']
@@ -595,8 +666,28 @@ class IRRA(nn.Module):
                     sk_img_feat = sk_img_feats[:,0,:].float()
                     nir_img_feat = nir_img_feats[:,0,:].float()
                     text_feat = text_feats[torch.arange(text_feats.shape[0]), caption_ids.argmax(dim=-1)].float()
+                
+                # Apply MoE processing to multi-modal features
+                # 对多模态特征应用MoE处理
+                features_dict = {
+                    'vis': vis_img_feat,
+                    'cp': cp_img_feat,
+                    'sk': sk_img_feat,
+                    'nir': nir_img_feat
+                }
+                enhanced_features, moe_aux_loss = self.moe_processor(features_dict)
+                
+                # Update features with MoE enhanced versions
+                vis_img_feat = enhanced_features['vis']
+                cp_img_feat = enhanced_features['cp']
+                sk_img_feat = enhanced_features['sk']
+                nir_img_feat = enhanced_features['nir']
+                
                 i_feats = vis_img_feat
                 t_feats = (text_feat + cp_img_feat+sk_img_feat+nir_img_feat) * 0.25
+                
+                # Add MoE auxiliary loss to return dict
+                ret.update({'moe_aux_loss': moe_aux_loss * self.moe_aux_loss_weight})
             
             else:
                 images = batch['images']

@@ -314,16 +314,16 @@ def do_train(start_epoch, args, model, train_loader, evaluator, optimizer,
             meters['nir_sdm_loss'].update(ret.get('nir_sdm_Loss', 0), batch_size)
             meters['cp_sdm_loss'].update(ret.get('cp_sdm_Loss', 0), batch_size)
             meters['text_sdm_loss'].update(ret.get('text_sdm_Loss', 0), batch_size)
-            meters['multi_modal_contrastive_itc_loss'].update(ret.get('multi_modal_contrastive_itc_loss', 0), batch_size)
-            meters['sk_itc_loss'].update(ret.get('sk_itc_Loss', 0), batch_size)
-            meters['nir_itc_loss'].update(ret.get('nir_itc_Loss', 0), batch_size)
-            meters['cp_itc_loss'].update(ret.get('cp_itc_Loss', 0), batch_size)
-            meters['text_itc_loss'].update(ret.get('text_itc_Loss', 0), batch_size)
+            meters['multi_modal_contrastive_itc_loss'].update(ret.get('multi_modal_contrastive_itc_Loss', 0), batch_size)
+            meters['sk_itc_loss'].update(ret.get('sk_itc_loss', 0), batch_size)
+            meters['nir_itc_loss'].update(ret.get('nir_itc_loss', 0), batch_size)
+            meters['cp_itc_loss'].update(ret.get('cp_itc_loss', 0), batch_size)
+            meters['text_itc_loss'].update(ret.get('text_itc_loss', 0), batch_size)
             meters['sdm_loss'].update(ret.get('sdm_loss', 0), batch_size)
             meters['itc_loss'].update(ret.get('itc_loss', 0), batch_size)
             meters['id_loss'].update(ret.get('id_loss', 0), batch_size)
             meters['mlm_loss'].update(ret.get('mlm_loss', 0), batch_size)
-            meters['aux_loss'].update(ret.get('nir_itc_aux_Loss', 0)+ret.get('cp_itc_aux_Loss', 0)+ret.get('sk_itc_aux_Loss', 0)+ret.get('text_itc_aux_Loss', 0), batch_size)
+            meters['aux_loss'].update(ret.get('nir_itc_aux_loss', 0)+ret.get('cp_itc_aux_loss', 0)+ret.get('sk_itc_aux_loss', 0)+ret.get('text_itc_aux_loss', 0), batch_size)
 
             meters['img_acc'].update(ret.get('img_acc', 0), batch_size)
             meters['txt_acc'].update(ret.get('txt_acc', 0), batch_size)
@@ -390,32 +390,76 @@ def do_train(start_epoch, args, model, train_loader, evaluator, optimizer,
                 
                 # Log accumulated MoE gate information
                 if accumulated_gate_info:
-                    logger.info("=== Accumulated MoE Gate Information ===")
+                    logger.info("=== MoE Gate Information ===")
+                    
+                    # Collect RGB and Query information separately
+                    rgb_expert_usage_list = []
+                    rgb_gate_probs_list = []
+                    query_expert_usage_list = []
+                    query_gate_probs_list = []
+                    
+                    # Process each modal's gate info
                     for gate_key, gate_data in accumulated_gate_info.items():
                         modal_name = gate_key.replace('_gate_info', '')
                         count = gate_data['count']
-                        logger.info(f"Modal: {modal_name} (Accumulated over {count} iterations)")
                         
-                        # Log accumulated RGB gate info
-                        if 'rgb_gate_info' in gate_data['data']:
-                            rgb_info = gate_data['data']['rgb_gate_info']
-                            avg_temperature = rgb_info['temperature_sum'] / count
-                            avg_expert_usage = (rgb_info['expert_usage_sum'] / count).tolist()
-                            avg_gate_probs = (rgb_info['gate_probs_mean_sum'] / count).tolist()
-                            logger.info(f"  RGB - Avg Temperature: {avg_temperature:.4f}")
-                            logger.info(f"  RGB - Avg Expert Usage: {[f'{x:.2f}' for x in avg_expert_usage]}")
-                            logger.info(f"  RGB - Avg Gate Probs Mean: {[f'{x:.2f}' for x in avg_gate_probs]}")
-                        
-                        # Log accumulated Query gate info
+                        # Log individual query modal information
                         if 'query_gate_info' in gate_data['data']:
                             query_info = gate_data['data']['query_gate_info']
-                            avg_temperature = query_info['temperature_sum'] / count
                             avg_expert_usage = (query_info['expert_usage_sum'] / count).tolist()
                             avg_gate_probs = (query_info['gate_probs_mean_sum'] / count).tolist()
-                            logger.info(f"  Query - Avg Temperature: {avg_temperature:.4f}")
-                            logger.info(f"  Query - Avg Expert Usage: {[f'{x:.2f}' for x in avg_expert_usage]}")
-                            logger.info(f"  Query - Avg Gate Probs Mean: {[f'{x:.2f}' for x in avg_gate_probs]}")
-                    logger.info("=== End Accumulated Gate Information ===")
+                            
+                            logger.info(f"Query Modal [{modal_name}]:")
+                            logger.info(f"  Expert Usage: {[f'{x:.3f}' for x in avg_expert_usage]}")
+                            logger.info(f"  Gate Probs: {[f'{x:.3f}' for x in avg_gate_probs]}")
+                            
+                            # Collect for global average
+                            query_expert_usage_list.append(avg_expert_usage)
+                            query_gate_probs_list.append(avg_gate_probs)
+                        
+                        # Collect RGB information (will be averaged across all modals)
+                        if 'rgb_gate_info' in gate_data['data']:
+                            rgb_info = gate_data['data']['rgb_gate_info']
+                            avg_expert_usage = (rgb_info['expert_usage_sum'] / count).tolist()
+                            avg_gate_probs = (rgb_info['gate_probs_mean_sum'] / count).tolist()
+                            
+                            rgb_expert_usage_list.append(avg_expert_usage)
+                            rgb_gate_probs_list.append(avg_gate_probs)
+                    
+                    # Log averaged RGB information (since all RGB are identical)
+                    if rgb_expert_usage_list:
+                        avg_rgb_expert_usage = torch.tensor(rgb_expert_usage_list).mean(dim=0).tolist()
+                        avg_rgb_gate_probs = torch.tensor(rgb_gate_probs_list).mean(dim=0).tolist()
+                        
+                        logger.info(f"Gallery (RGB):")
+                        logger.info(f"  Expert Usage: {[f'{x:.3f}' for x in avg_rgb_expert_usage]}")
+                        logger.info(f"  Gate Probs: {[f'{x:.3f}' for x in avg_rgb_gate_probs]}")
+                    
+                    # Log global average (RGB + all Query modals)
+                    if rgb_expert_usage_list and query_expert_usage_list:
+                        all_expert_usage = rgb_expert_usage_list + query_expert_usage_list
+                        all_gate_probs = rgb_gate_probs_list + query_gate_probs_list
+                        
+                        global_avg_expert_usage = torch.tensor(all_expert_usage).mean(dim=0).tolist()
+                        global_avg_gate_probs = torch.tensor(all_gate_probs).mean(dim=0).tolist()
+                        
+                        logger.info(f"Global Average (All Modalities):")
+                        logger.info(f"  Expert Usage: {[f'{x:.3f}' for x in global_avg_expert_usage]}")
+                        logger.info(f"  Gate Probs: {[f'{x:.3f}' for x in global_avg_gate_probs]}")
+                    
+                    # Log auxiliary losses
+                    logger.info(f"MoE Auxiliary Losses:")
+                    for gate_key in accumulated_gate_info.keys():
+                        modal_name = gate_key.replace('_gate_info', '')
+                        aux_loss_key = f'{modal_name}_itc_aux_loss'
+                        if aux_loss_key in ret:
+                            logger.info(f"  {modal_name}: {ret[aux_loss_key]:.6f}")
+                    
+                    # Log global auxiliary loss
+                    if 'global_aux_loss' in ret:
+                        logger.info(f"  Global: {ret['global_aux_loss']:.6f}")
+                    
+                    logger.info("=== End MoE Gate Information ===")
                     
                     # 清空累积的门控信息
                     accumulated_gate_info.clear()

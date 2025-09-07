@@ -92,8 +92,11 @@ class IRRA(nn.Module):
             hidden_dim=moe_feature_dim * 2,  # 专家网络隐藏层维度
             num_experts=args.moe_num_experts,
             top_k=args.moe_top_k,
-            aux_loss_weight=args.moe_aux_loss_weight,
+            aux_loss_weight=args.moe_modal_aux_loss_weight,
         )
+        
+        # Store global aux loss weight for later use
+        self.moe_global_aux_loss_weight = args.moe_global_aux_loss_weight
         
 
     def _set_task(self): # 打印任务
@@ -148,7 +151,11 @@ class IRRA(nn.Module):
             ret.update({'temperature': 1 / logit_scale})
             if self.args.use_multimodal_layers_in_pairs:
                 if 'itc' in self.current_task:
-                    multi_modal_contrastive_itc_loss = 0                
+                    multi_modal_contrastive_itc_loss = 0
+                    # Initialize variables for global auxiliary loss computation
+                    accumulated_features = []  # Store detached features for global aux loss
+                    total_tokens = 0
+                    
                     for modal_name, modal_data in query_feats.items(): # 遍历每个查询模态
                         with autocast(device_type='cuda', dtype=self.autocast_dtype):
                             # 1.encoder计算特征
@@ -200,6 +207,13 @@ class IRRA(nn.Module):
                                 else:
                                     t_feats_modal = nir_img_feats[:,0,:].float()
                             
+                            # Save detached features for global auxiliary loss computation
+                            # 保存detach的特征用于全局辅助损失计算
+                            accumulated_features.append({
+                                'rgb_feats': i_feats.detach(),
+                                'query_feats': t_feats_modal.detach()
+                            })
+                            
                             # Apply MoE processing to rgb and current query modal features
                             # 对rgb和当前query模态特征应用MoE处理（使用余弦路由）
                             i_feats, t_feats_modal, moe_aux_loss, gate_info = self.moe_processor(
@@ -211,10 +225,10 @@ class IRRA(nn.Module):
                             
                             # 2.计算原始qg对比学习损失
                             qg_loss = objectives.compute_itc(i_feats, t_feats_modal, logit_scale) / len(query_feats)
-                            # Add MoE auxiliary loss
-                            ret.update({f'{modal_name}_itc_Loss': qg_loss.detach()}) # detach后不带计算图, 大写L避免被计入总损失        
-                            ret.update({f'{modal_name}_itc_aux_Loss': moe_aux_loss.detach()}) # detach后不带计算图, 大写L避免被计入总损失        
-                            qg_loss = qg_loss + moe_aux_loss
+                            # Add per-modal MoE auxiliary loss with reduced weight
+                            ret.update({f'{modal_name}_itc_loss': qg_loss.detach()}) # detach后不带计算图, 小写l参与总损失计算        
+                            ret.update({f'{modal_name}_itc_aux_loss': moe_aux_loss.detach()}) # detach后不带计算图, 小写l参与总损失计算        
+                            qg_loss = qg_loss + moe_aux_loss  # moe_aux_loss already weighted by moe_modal_aux_loss_weight
                             # qg_loss = 0.8 * qg_loss
 
                         if self.autocast_dtype == torch.float16 and scaler is not None:
@@ -222,85 +236,53 @@ class IRRA(nn.Module):
                         else:
                             qg_loss.backward()
 
-                        
-                        '''
-                        # 跨模态对比学习：需要重新计算特征因为计算图已被清空
-                        other_modals = [k for k in query_feats.keys() if k != modal_name]
-                        if other_modals:
-                            with autocast(device_type='cuda', dtype=self.autocast_dtype):
-                                # 重新计算当前模态的特征
-                                if modal_name == 'text':
-                                    _, _, _, _, text_feats_new = self.base_model(text=modal_data)
-                                    if self.is_safetensors:
-                                        t_feats_modal_new = text_feats_new.float()
-                                    else:
-                                        t_feats_modal_new = text_feats_new[torch.arange(text_feats_new.shape[0]), modal_data.argmax(dim=-1)].float()
-                                elif modal_name == 'cp':
-                                    _, cp_img_feats_new, _, _, _ = self.base_model(cp_images=modal_data)
-                                    if self.is_safetensors:
-                                        t_feats_modal_new = cp_img_feats_new.float()
-                                    else:
-                                        t_feats_modal_new = cp_img_feats_new[:,0,:].float()
-                                elif modal_name == 'sk':
-                                    _, _, sk_img_feats_new, _, _ = self.base_model(sk_images=modal_data)
-                                    if self.is_safetensors:
-                                        t_feats_modal_new = sk_img_feats_new.float()
-                                    else:
-                                        t_feats_modal_new = sk_img_feats_new[:,0,:].float()
-                                elif modal_name == 'nir':
-                                    _, _, _, nir_img_feats_new, _ = self.base_model(nir_images=modal_data)
-                                    if self.is_safetensors:
-                                        t_feats_modal_new = nir_img_feats_new.float()
-                                    else:
-                                        t_feats_modal_new = nir_img_feats_new[:,0,:].float()
-
-                                # 随机选择一个其他模态
-                                random_modal = random.choice(other_modals)
-                                random_modal_data = query_feats[random_modal]
-                                
-                                # 计算随机选择模态的特征
-                                if random_modal == 'text':
-                                    _, _, _, _, random_text_feats = self.base_model(text=random_modal_data)
-                                    if self.is_safetensors:
-                                        random_feats = random_text_feats.float()
-                                    else:
-                                        random_feats = random_text_feats[torch.arange(random_text_feats.shape[0]), random_modal_data.argmax(dim=-1)].float()
-                                elif random_modal == 'cp':
-                                    _, random_cp_feats, _, _, _ = self.base_model(cp_images=random_modal_data)
-                                    if self.is_safetensors:
-                                        random_feats = random_cp_feats.float()
-                                    else:
-                                        random_feats = random_cp_feats[:,0,:].float()
-                                elif random_modal == 'sk':
-                                    _, _, random_sk_feats, _, _ = self.base_model(sk_images=random_modal_data)
-                                    if self.is_safetensors:
-                                        random_feats = random_sk_feats.float()
-                                    else:
-                                        random_feats = random_sk_feats[:,0,:].float()
-                                elif random_modal == 'nir':
-                                    _, _, _, random_nir_feats, _ = self.base_model(nir_images=random_modal_data)
-                                    if self.is_safetensors:
-                                        random_feats = random_nir_feats.float()
-                                    else:
-                                        random_feats = random_nir_feats[:,0,:].float()
-                                
-                                # 重新计算跨模态对比学习损失
-                                cross_modal_loss = objectives.compute_itc(t_feats_modal_new, random_feats, logit_scale) / len(query_feats)
-                                cross_modal_loss = 0.2 * cross_modal_loss  # 给跨模态损失一个权重
-                            
-                            # 在autocast外面进行跨模态损失的backward
-                            if self.autocast_dtype == torch.float16 and scaler is not None:
-                                scaler.scale(cross_modal_loss).backward()
-                            else:
-                                cross_modal_loss.backward()
-                            
-                            # 更新合并损失用于记录
-                            loss = qg_loss + cross_modal_loss
-                        '''
-                        
                         multi_modal_contrastive_itc_loss += qg_loss
+                    
+                    # Compute global auxiliary loss after processing all modalities
+                    # 在处理完所有模态后计算全局辅助损失
+                    if accumulated_features:
+                        with autocast(device_type='cuda', dtype=self.autocast_dtype):
+                            # Re-compute routing for all accumulated features to get gate probabilities
+                            # 重新计算所有累积特征的路由以获取门控概率
+                            all_gate_probs = []
+                            for feat_pair in accumulated_features:
+                                # Use MoE processor's routing function to get gate probabilities
+                                # 使用MoE处理器的路由函数获取门控概率
+                                _, _, _, gate_info = self.moe_processor(
+                                    feat_pair['rgb_feats'], feat_pair['query_feats']
+                                )
+                                # Collect gate probabilities from both rgb and query modalities
+                                if 'rgb_gate_info' in gate_info and 'gate_probs_mean' in gate_info['rgb_gate_info']:
+                                    all_gate_probs.append(gate_info['rgb_gate_info']['gate_probs_mean'])
+                                if 'query_gate_info' in gate_info and 'gate_probs_mean' in gate_info['query_gate_info']:
+                                    all_gate_probs.append(gate_info['query_gate_info']['gate_probs_mean'])
+                            
+                            if all_gate_probs:
+                                # Average gate probabilities across all modalities
+                                # 对所有模态的门控概率进行平均
+                                avg_gate_probs = torch.stack(all_gate_probs).mean(dim=0)
+                                
+                                # Compute global auxiliary loss using L2 loss
+                                # 使用L2损失计算全局辅助损失
+                                num_experts = avg_gate_probs.size(0)
+                                uniform_prob = 1.0 / num_experts
+                                expert_fractions = avg_gate_probs / avg_gate_probs.sum()
+                                global_aux_loss = torch.sum((expert_fractions - uniform_prob) ** 2)
+                                global_aux_loss = global_aux_loss * self.moe_global_aux_loss_weight
+                                
+                                # Add global auxiliary loss to the total loss
+                                # 将全局辅助损失加入总损失
+                                ret.update({'global_aux_loss': global_aux_loss.detach()})
+                        
+                        # Backward pass for global auxiliary loss (outside autocast)
+                        if all_gate_probs:
+                            if self.autocast_dtype == torch.float16 and scaler is not None:
+                                scaler.scale(global_aux_loss).backward()
+                            else:
+                                global_aux_loss.backward()
+                    
                     # multi_modal_contrastive_itc_loss.backward()
-                    ret.update({'multi_modal_contrastive_itc_loss': multi_modal_contrastive_itc_loss.detach()})
+                    ret.update({'multi_modal_contrastive_itc_Loss': multi_modal_contrastive_itc_loss.detach()})
 
                 if 'sdm' in self.current_task:
                     multi_modal_contrastive_sdm_loss = 0
@@ -380,7 +362,11 @@ class IRRA(nn.Module):
                     ret.update({'multi_modal_contrastive_sdm_loss': multi_modal_contrastive_sdm_loss.detach()})
             else :
                 if 'itc' in self.current_task:
-                    multi_modal_contrastive_itc_loss = 0                
+                    multi_modal_contrastive_itc_loss = 0
+                    # Initialize variables for global auxiliary loss computation
+                    accumulated_features = []  # Store detached features for global aux loss
+                    total_tokens = 0
+                    
                     for modal_name, modal_data in query_feats.items(): # 遍历每个查询模态
                         with autocast(device_type='cuda', dtype=self.autocast_dtype):
                             # 1.encoder计算特征
@@ -432,19 +418,27 @@ class IRRA(nn.Module):
                                 else:
                                     t_feats_modal = nir_img_feats[:,0,:].float()
                             
+                            # Save detached features for global auxiliary loss computation
+                            # 保存detach的特征用于全局辅助损失计算
+                            accumulated_features.append({
+                                'rgb_feats': i_feats.detach(),
+                                'query_feats': t_feats_modal.detach()
+                            })
+                            
                             # Apply MoE processing to rgb and current query modal features
                             # 对rgb和当前query模态特征应用MoE处理（使用余弦路由）
                             i_feats, t_feats_modal, moe_aux_loss, gate_info = self.moe_processor(
                                 i_feats, t_feats_modal
                             )
+                            
                             ret.update({f'{modal_name}_gate_info': gate_info})
                             
                             # 2.计算原始qg对比学习损失
                             qg_loss = objectives.compute_itc(i_feats, t_feats_modal, logit_scale) / len(query_feats)
                             # Add MoE auxiliary loss
-                            ret.update({f'{modal_name}_itc_Loss': qg_loss.detach()}) # detach后不带计算图, 大写L避免被计入总损失        
-                            ret.update({f'{modal_name}_itc_aux_Loss': moe_aux_loss.detach()}) # detach后不带计算图, 大写L避免被计入总损失        
-                            qg_loss = qg_loss + moe_aux_loss
+                            ret.update({f'{modal_name}_itc_loss': qg_loss.detach()}) # detach后不带计算图, 大写L避免被计入总损失        
+                            ret.update({f'{modal_name}_itc_aux_loss': moe_aux_loss.detach()}) # detach后不带计算图, 大写L避免被计入总损失        
+                            qg_loss = qg_loss + moe_aux_loss  # moe_aux_loss already weighted by moe_modal_aux_loss_weight
                             # qg_loss = 0.8 * qg_loss
 
                         if self.autocast_dtype == torch.float16 and scaler is not None:
@@ -453,85 +447,54 @@ class IRRA(nn.Module):
                             qg_loss.backward()
 
 
-                        
-                        '''
-                        # 跨模态对比学习：需要重新计算特征因为计算图已被清空
-                        other_modals = [k for k in query_feats.keys() if k != modal_name]
-                        if other_modals:
-                            with autocast(device_type='cuda', dtype=self.autocast_dtype):
-                                # 重新计算当前模态的特征
-                                if modal_name == 'text':
-                                    _, _, _, _, text_feats_new = self.base_model(text=modal_data)
-                                    if self.is_safetensors:
-                                        t_feats_modal_new = text_feats_new.float()
-                                    else:
-                                        t_feats_modal_new = text_feats_new[torch.arange(text_feats_new.shape[0]), modal_data.argmax(dim=-1)].float()
-                                elif modal_name == 'cp':
-                                    _, cp_img_feats_new, _, _, _ = self.base_model(cp_images=modal_data)
-                                    if self.is_safetensors:
-                                        t_feats_modal_new = cp_img_feats_new.float()
-                                    else:
-                                        t_feats_modal_new = cp_img_feats_new[:,0,:].float()
-                                elif modal_name == 'sk':
-                                    _, _, sk_img_feats_new, _, _ = self.base_model(sk_images=modal_data)
-                                    if self.is_safetensors:
-                                        t_feats_modal_new = sk_img_feats_new.float()
-                                    else:
-                                        t_feats_modal_new = sk_img_feats_new[:,0,:].float()
-                                elif modal_name == 'nir':
-                                    _, _, _, nir_img_feats_new, _ = self.base_model(nir_images=modal_data)
-                                    if self.is_safetensors:
-                                        t_feats_modal_new = nir_img_feats_new.float()
-                                    else:
-                                        t_feats_modal_new = nir_img_feats_new[:,0,:].float()
-
-                                # 随机选择一个其他模态
-                                random_modal = random.choice(other_modals)
-                                random_modal_data = query_feats[random_modal]
-                                
-                                # 计算随机选择模态的特征
-                                if random_modal == 'text':
-                                    _, _, _, _, random_text_feats = self.base_model(text=random_modal_data)
-                                    if self.is_safetensors:
-                                        random_feats = random_text_feats.float()
-                                    else:
-                                        random_feats = random_text_feats[torch.arange(random_text_feats.shape[0]), random_modal_data.argmax(dim=-1)].float()
-                                elif random_modal == 'cp':
-                                    _, random_cp_feats, _, _, _ = self.base_model(cp_images=random_modal_data)
-                                    if self.is_safetensors:
-                                        random_feats = random_cp_feats.float()
-                                    else:
-                                        random_feats = random_cp_feats[:,0,:].float()
-                                elif random_modal == 'sk':
-                                    _, _, random_sk_feats, _, _ = self.base_model(sk_images=random_modal_data)
-                                    if self.is_safetensors:
-                                        random_feats = random_sk_feats.float()
-                                    else:
-                                        random_feats = random_sk_feats[:,0,:].float()
-                                elif random_modal == 'nir':
-                                    _, _, _, random_nir_feats, _ = self.base_model(nir_images=random_modal_data)
-                                    if self.is_safetensors:
-                                        random_feats = random_nir_feats.float()
-                                    else:
-                                        random_feats = random_nir_feats[:,0,:].float()
-                                
-                                # 重新计算跨模态对比学习损失
-                                cross_modal_loss = objectives.compute_itc(t_feats_modal_new, random_feats, logit_scale) / len(query_feats)
-                                cross_modal_loss = 0.2 * cross_modal_loss  # 给跨模态损失一个权重
-                            
-                            # 在autocast外面进行跨模态损失的backward
-                            if self.autocast_dtype == torch.float16 and scaler is not None:
-                                scaler.scale(cross_modal_loss).backward()
-                            else:
-                                cross_modal_loss.backward()
-                            
-                            # 更新合并损失用于记录
-                            loss = qg_loss + cross_modal_loss
-                        '''
-                        
                         multi_modal_contrastive_itc_loss += qg_loss
+                    
+                    # Compute global auxiliary loss after processing all modalities
+                    # 在处理完所有模态后计算全局辅助损失
+                    if accumulated_features:
+                        with autocast(device_type='cuda', dtype=self.autocast_dtype):
+                            # Re-compute routing for all accumulated features to get gate probabilities
+                            # 重新计算所有累积特征的路由以获取门控概率
+                            all_gate_probs = []
+                            for i, feat_pair in enumerate(accumulated_features):
+                                # Use MoE processor's routing function to get gate probabilities
+                                # 使用MoE处理器的路由函数获取门控概率
+                                _, _, _, gate_info = self.moe_processor(
+                                    feat_pair['rgb_feats'], feat_pair['query_feats']
+                                )
+                                # Collect gate probabilities from both rgb and query modalities
+                                if 'rgb_gate_info' in gate_info and 'gate_probs_mean' in gate_info['rgb_gate_info']:
+                                    all_gate_probs.append(gate_info['rgb_gate_info']['gate_probs_mean'])
+                                if 'query_gate_info' in gate_info and 'gate_probs_mean' in gate_info['query_gate_info']:
+                                    all_gate_probs.append(gate_info['query_gate_info']['gate_probs_mean'])
+                            
+                            if all_gate_probs:
+
+                                # Average gate probabilities across all modalities
+                                # 对所有模态的门控概率进行平均
+                                avg_gate_probs = torch.stack(all_gate_probs).mean(dim=0)
+                                
+                                # Compute global auxiliary loss using L2 loss
+                                # 使用L2损失计算全局辅助损失
+                                num_experts = avg_gate_probs.size(0)
+                                uniform_prob = 1.0 / num_experts
+                                expert_fractions = avg_gate_probs / avg_gate_probs.sum()
+                                global_aux_loss = torch.sum((expert_fractions - uniform_prob) ** 2)
+                                global_aux_loss = global_aux_loss * self.moe_global_aux_loss_weight
+                                
+                                # Add global auxiliary loss to the total loss
+                                # 将全局辅助损失加入总损失
+                                ret.update({'global_aux_loss': global_aux_loss.detach()})
+                        
+                        # Backward pass for global auxiliary loss (outside autocast)
+                        if 'global_aux_loss' in locals():
+                            if self.autocast_dtype == torch.float16 and scaler is not None:
+                                scaler.scale(global_aux_loss).backward()
+                            else:
+                                global_aux_loss.backward()
+                    
                     # multi_modal_contrastive_itc_loss.backward()
-                    ret.update({'multi_modal_contrastive_itc_loss': multi_modal_contrastive_itc_loss.detach()})
+                    ret.update({'multi_modal_contrastive_itc_Loss': multi_modal_contrastive_itc_loss.detach()})
 
                 if 'sdm' in self.current_task:
                     multi_modal_contrastive_sdm_loss = 0

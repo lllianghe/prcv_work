@@ -22,10 +22,11 @@ python train.py \
 --step_size 2000 \
 --img_size 224,224 \
 --freeze_embedding_layers \
---lr_moe_frm 1e-1 \
---moe_num_experts 64 \
---moe_top_k 3 \
---moe_aux_loss_weight 100
+--lr_moe_frm 1e1 \
+--moe_num_experts 16 \
+--moe_top_k 6 \
+--moe_modal_aux_loss_weight 0 \
+--moe_global_aux_loss_weight 10
 
 
 """

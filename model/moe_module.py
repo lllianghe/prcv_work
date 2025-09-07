@@ -121,7 +121,7 @@ class NativeMoELayer(nn.Module):
         
         # Collect gate information for logging
         gate_info = {
-            'gate_probs_mean': gate_probs.mean(dim=0).detach().cpu(),  # Average probability for each expert
+            'gate_probs_mean': gate_probs.mean(dim=0),  # Average probability for each expert (keep gradients)
             'expert_usage': torch.bincount(top_k_indices.flatten(), minlength=self.num_experts).float().detach().cpu(),  # Usage count per expert
             'temperature': logit_scale.detach().cpu().item()          # Current temperature value
         }

@@ -123,9 +123,9 @@ if __name__ == '__main__':
 
             '''
             # 复制layernorm层的值
+            '''
             for lnmodal_module in model.base_model.lnmodal_modules:
                 lnmodal_module.copy_params_from_org_module()
-            '''
             
             model.to(device)
 

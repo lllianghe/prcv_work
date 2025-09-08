@@ -74,6 +74,7 @@ def get_args():
     parser.add_argument("--gradient_accumulation_steps", type=int, default=1, help="Number of steps to accumulate gradients before optimizer step")
     parser.add_argument("--lora_backbone_lr", type=float, default=1e-6, help="Learning rate for backbone layers that have LoRA modules attached")
     parser.add_argument("--lora_lr", type=float, default=1e-1, help="Learning rate for backbone layers that have LoRA modules attached")
+    parser.add_argument("--ln_lr", type=float, default=1e-5, help="Learning rate for LayerNorm layers")
     
 
     ######################## scheduler ########################

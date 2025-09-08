@@ -1,6 +1,6 @@
 DATASET_NAME="ORBench"
 
-CUDA_VISIBLE_DEVICES=2 \
+CUDA_VISIBLE_DEVICES=7 \
 python train.py \
 --batch_size 24 \
 --loss_name 'multi_modal_contrastive+itc' \
@@ -22,6 +22,5 @@ python train.py \
 --img_size 224,224 \
 --num_epoch 1000 \
 --lr 5e-6 \
---lora_lr 1e-1 \
---lora_backbone_lr 1e-6 \
+--ln_lr 2e-2 \
 --weight_decay 4e-5 \

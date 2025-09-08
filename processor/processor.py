@@ -379,7 +379,7 @@ def do_train(start_epoch, args, model, train_loader, evaluator, optimizer,
                 logger.info(f"best mAP: {best_mAP} at epoch {arguments['best_mAP_epoch']}")
                 """
                         
-                if epoch >= 600 and epoch % 200 == 0:
+                if epoch >= 500 and epoch % 150 == 0:
                     checkpointer.save(f"best_{epoch}", **arguments)
 
 def do_inference(model, test_img_loader, test_txt_loader):

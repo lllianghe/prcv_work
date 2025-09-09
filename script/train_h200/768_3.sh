@@ -6,7 +6,7 @@ echo "当前 Conda 环境: $CONDA_DEFAULT_ENV"
 echo "当前 Python 路径: $(which python)"
 # 训练命令
 echo "$(date): 开始训练"
-CUDA_VISIBLE_DEVICES=6 python train.py \
+CUDA_VISIBLE_DEVICES=3 python train.py \
 --batch_size 32 \
 --loss_name 'multi_modal_contrastive+itc' \
 --sampler random \

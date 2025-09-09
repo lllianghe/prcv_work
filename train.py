@@ -81,7 +81,9 @@ if __name__ == '__main__':
     wandb.log({"message": f"Total params: {total_params:.2f}M"})
     
     model.to(device)
-    
+
+    for name, param in model.named_parameters():
+        logger.info(f"Parameter:{name}.Requires_Grad:{param.requires_grad}")
 
     if args.distributed:
         model = torch.nn.parallel.DistributedDataParallel(
@@ -98,7 +100,6 @@ if __name__ == '__main__':
     is_master = get_rank() == 0 #分布式的获取进程排名 如不开启分布式训练 则定义为0
     checkpointer = Checkpointer(model, optimizer, scheduler, args.output_dir, is_master) #负责模型加载保存
     
-
     start_epoch = 1
     # 统一的检查点加载逻辑
     if args.resume:
@@ -144,6 +145,13 @@ if __name__ == '__main__':
             for modality in modalities:
                 model.base_model.vision_model.embeddings.add_patch_embedding(modality)
             model.base_model.vision_model.embeddings.patch_embedding.weight.requires_grad = False
+
+            '''
+            # 复制layernorm层的值
+            '''
+            for lnmodal_module in model.base_model.lnmodal_modules:
+                lnmodal_module.copy_params_from_org_module()
+            
             model.to(device)
 
     if args.dataset_name == 'ORBench':

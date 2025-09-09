@@ -265,6 +265,11 @@ def do_train(start_epoch, args, model, train_loader, evaluator, optimizer,
             if total_loss.requires_grad:
                 total_loss.backward()
             
+            """
+            for i, lora_module in enumerate(model.base_model.vision_model.lora_modules):
+                print(f"LoRA模块{i} - lora_down: {lora_module.lora_down.weight.grad[0][0]}, lora_up: {lora_module.lora_up.weight.grad[0][0]}")
+            """
+
             accumulation_count += 1
             
             # 只在累积步数达到时执行optimizer.step()
@@ -366,18 +371,27 @@ def do_train(start_epoch, args, model, train_loader, evaluator, optimizer,
                 
                 plot_and_save_curves(args.output_dir, len(train_loader), train_loss_list, mAP_list, lr_list, log_period, eval_iters_list, eval_epoch_list, loss_dict, single_modal_mAPs_history)
 
+
                 torch.cuda.empty_cache()
+                """
                 if best_mAP < mAP:
                     best_mAP = mAP
                     arguments["best_mAP_epoch"] = epoch
                     checkpointer.save("best", **arguments)
                 logger.info(f"best mAP: {best_mAP} at epoch {arguments['best_mAP_epoch']}")
                 wandb.log({"message": f"best mAP: {best_mAP} at epoch {arguments['best_mAP_epoch']}"})
-                
+                """
+                """
+                if epoch >= 500 and epoch % 150 == 0:
+                    checkpointer.save(f"best_{epoch}", **arguments)
+                """
+
         if epoch == num_epoch:
             arguments["best_mAP_epoch"] = epoch
             checkpointer.save("best", **arguments)
             wandb.log({"message": "save success"})
+                
+                        
 
 def do_inference(model, test_img_loader, test_txt_loader):
 

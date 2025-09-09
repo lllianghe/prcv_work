@@ -22,6 +22,21 @@ def build_optimizer(args, model):
             weight_decay = args.weight_decay_bias
         if "classifier" in key or "mlm_head" in key:
             lr = args.lr * args.lr_factor
+        if "lora" in key:
+            lr = args.lora_lr
+            weight_decay = 0
+        # 为vision encoder中有LoRA模块的原始层设置特定学习率
+        if ("q_proj" in key or "v_proj" in key) and "lora" not in key and "vision_model" in key:
+            lr = args.lora_backbone_lr
+        # 为被VisionLayerNormModule替换的LayerNorm层设置特定学习率
+        is_vision_layernorm = False
+        if hasattr(model, 'base_model') and hasattr(model.base_model, 'lnmodal_modules'):
+            for lnmodal_module in model.base_model.lnmodal_modules:
+                if lnmodal_module.lnmodal_name in key:
+                    is_vision_layernorm = True
+                    break
+        if is_vision_layernorm:
+            lr = args.ln_lr
         # weight_decay用于l2正则化来防止过拟合
         params += [{"params": [value], "lr": lr, "weight_decay": weight_decay}]
 

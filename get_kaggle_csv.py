@@ -211,7 +211,7 @@ if __name__ == '__main__':
     
     model = build_model(args,num_classes=int(400*(1-args.test_size))) #num_class必须和之前构建的model中的num_class对应
     checkpointer = Checkpointer(model)
-    checkpointer.load(f=op.join(args.output_dir, 'best.pth'))
+    checkpointer.load(f=op.join(args.output_dir, 'best_1000.pth'))
     model.to(device)
     
     if args.add_multimodal_layers:
@@ -222,7 +222,7 @@ if __name__ == '__main__':
         print(f"embedding_gfeats success")
     json_file = '/fs-computility/ai-shen/macaoyuan.p/hzc/PRCV/ORBench_PRCV/val/val_queries.json'
     query_type_ranges = get_query_type_idx_range(json_file)
-    output_file=op.join(args.output_dir, 'ranking_list.csv')
+    output_file=op.join(args.output_dir, 'ranking_list_epoch_1000.csv')
     with open(output_file, mode='w', newline='') as csvfile:
         fieldnames = ['query_idx', 'query_type', 'ranking_list_idx']
         writer = csv.DictWriter(csvfile, fieldnames=fieldnames)

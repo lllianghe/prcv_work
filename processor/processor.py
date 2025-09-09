@@ -221,6 +221,9 @@ def do_train(start_epoch, args, model, train_loader, evaluator, optimizer,
     
     # 累积门控信息字典
     accumulated_gate_info = {}
+    
+    # 累积MoE MLP门控信息字典
+    accumulated_moe_mlp_gate_info = {}
 
     # train
     for epoch in range(start_epoch, num_epoch + 1):
@@ -284,6 +287,30 @@ def do_train(start_epoch, args, model, train_loader, evaluator, optimizer,
                         accumulated_gate_info[gate_key]['data']['query_gate_info']['temperature_sum'] += query_info['temperature']
                         accumulated_gate_info[gate_key]['data']['query_gate_info']['expert_usage_sum'] += query_info['expert_usage'].float()
                         accumulated_gate_info[gate_key]['data']['query_gate_info']['gate_probs_mean_sum'] += query_info['gate_probs_mean'].float()
+            
+            # 累积MoE MLP门控信息
+            moe_mlp_gate_info_keys = [k for k in ret.keys() if 'moe_mlp_gate_info' in k]
+            for mlp_gate_key in moe_mlp_gate_info_keys:
+                if mlp_gate_key not in accumulated_moe_mlp_gate_info:
+                    accumulated_moe_mlp_gate_info[mlp_gate_key] = {'count': 0, 'data': {}}
+                
+                mlp_gate_data = ret[mlp_gate_key]
+                accumulated_moe_mlp_gate_info[mlp_gate_key]['count'] += 1
+                
+                # 累积每层的门控信息
+                for layer_key, layer_info in mlp_gate_data.items():
+                    if layer_key not in accumulated_moe_mlp_gate_info[mlp_gate_key]['data']:
+                        accumulated_moe_mlp_gate_info[mlp_gate_key]['data'][layer_key] = {
+                            'aux_loss_sum': layer_info.get('aux_loss', 0),
+                            'expert_usage_sum': layer_info.get('expert_usage', torch.zeros(8)).clone().float() if layer_info.get('expert_usage') is not None else torch.zeros(8).float(),
+                            'expert_prob_sum': layer_info.get('expert_prob', torch.zeros(8)).clone().float() if layer_info.get('expert_prob') is not None else torch.zeros(8).float()
+                        }
+                    else:
+                        accumulated_moe_mlp_gate_info[mlp_gate_key]['data'][layer_key]['aux_loss_sum'] += layer_info.get('aux_loss', 0)
+                        if layer_info.get('expert_usage') is not None:
+                            accumulated_moe_mlp_gate_info[mlp_gate_key]['data'][layer_key]['expert_usage_sum'] += layer_info.get('expert_usage').float()
+                        if layer_info.get('expert_prob') is not None:
+                            accumulated_moe_mlp_gate_info[mlp_gate_key]['data'][layer_key]['expert_prob_sum'] += layer_info.get('expert_prob').float()
             
             """
             # 验证模型权重是否更新
@@ -463,6 +490,45 @@ def do_train(start_epoch, args, model, train_loader, evaluator, optimizer,
                     
                     # 清空累积的门控信息
                     accumulated_gate_info.clear()
+                
+                # Log accumulated MoE MLP gate information
+                if accumulated_moe_mlp_gate_info:
+                    logger.info("=== MoE MLP Gate Information ===")
+                    
+                    # Process each modal's MLP gate info
+                    for mlp_gate_key, mlp_gate_data in accumulated_moe_mlp_gate_info.items():
+                        modal_name = mlp_gate_key.replace('_moe_mlp_gate_info', '')
+                        count = mlp_gate_data['count']
+                        
+                        logger.info(f"Modal [{modal_name}] MLP Layers:")
+                        
+                        # Log each layer's information
+                        for layer_key, layer_data in mlp_gate_data['data'].items():
+                            avg_aux_loss = layer_data['aux_loss_sum'] / count if count > 0 else 0
+                            avg_expert_usage = (layer_data['expert_usage_sum'] / count).tolist() if count > 0 else [0] * 8
+                            avg_expert_prob = (layer_data['expert_prob_sum'] / count).tolist() if count > 0 else [0] * 8
+                            
+                            logger.info(f"  {layer_key}:")
+                            logger.info(f"    Aux Loss: {avg_aux_loss:.6f}")
+                            logger.info(f"    Expert Usage: {[f'{x:.3f}' for x in avg_expert_usage]}")
+                            logger.info(f"    Expert Prob: {[f'{x:.3f}' for x in avg_expert_prob]}")
+                    
+                    # Log MoE MLP auxiliary losses
+                    logger.info(f"MoE MLP Auxiliary Losses:")
+                    for mlp_gate_key in accumulated_moe_mlp_gate_info.keys():
+                        modal_name = mlp_gate_key.replace('_moe_mlp_gate_info', '')
+                        aux_loss_key = f'{modal_name}_moe_mlp_aux_loss'
+                        if aux_loss_key in ret:
+                            logger.info(f"  {modal_name}: {ret[aux_loss_key]:.6f}")
+                    
+                    # Log global MoE MLP auxiliary loss
+                    if 'global_moe_mlp_aux_loss' in ret:
+                        logger.info(f"  Global MLP: {ret['global_moe_mlp_aux_loss']:.6f}")
+                    
+                    logger.info("=== End MoE MLP Gate Information ===")
+                    
+                    # 清空累积的MoE MLP门控信息
+                    accumulated_moe_mlp_gate_info.clear()
             
             # 只在实际执行optimizer.step()时调度学习率
             if  (n_iter + 1) % (scheduler_period) == 0:

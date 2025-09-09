@@ -12,6 +12,7 @@ import random
 
 from torch.amp import autocast,GradScaler
 from .moe_module import PersonReIDMoEProcessor
+from .moe_mlp import MoEMLPLayer
 
 
 # 主模型
@@ -98,6 +99,125 @@ class IRRA(nn.Module):
         # Store global aux loss weight for later use
         self.moe_global_aux_loss_weight = args.moe_global_aux_loss_weight
         
+        # MoE MLP层替换配置参数设置
+        self.global_aux_loss_weight = getattr(args, 'global_aux_loss_weight', 1.0)
+        self.modal_aux_loss_weight = getattr(args, 'modal_aux_loss_weight', 1.0)
+        self.moe_mlp_layers = getattr(args, 'moe_mlp_layers', 0)
+        self.moe_mlp_lr = getattr(args, 'moe_mlp_lr', None)
+        
+        # MoE MLP层替换功能集成
+        if self.moe_mlp_layers > 0:
+            # 替换vision encoder的后6层MLP为MoE MLP
+            layer_indices = list(range(6, 12))  # 索引6-11
+            replace_vision_mlp_with_moe(
+                self.base_model, 
+                layer_indices=layer_indices,
+                num_experts=8,
+                top_k=2
+            )
+            print(f"已将vision encoder的第{layer_indices}层MLP替换为MoE MLP，专家数量：8，top-k：2")
+        
+    def collect_moe_mlp_aux_loss(self):
+        """收集MoE MLP层的辅助损失和门控信息"""
+        total_aux_loss = torch.tensor(0.0, device=next(self.parameters()).device)
+        gate_info_dict = {}
+        
+        if self.moe_mlp_layers > 0:
+            vision_encoder = self.base_model.vision_model.encoder
+            layer_indices = list(range(6, 12))  # 后6层
+            
+            for layer_idx in layer_indices:
+                if layer_idx < len(vision_encoder.layers):
+                    layer = vision_encoder.layers[layer_idx]
+                    if isinstance(layer.mlp, MoEMLPLayer):
+                        # 获取该层的门控信息
+                        gate_info = layer.mlp.get_gate_info()
+                        if gate_info and 'aux_loss' in gate_info:
+                            total_aux_loss = total_aux_loss + gate_info['aux_loss']
+                            gate_info_dict[f'layer_{layer_idx}'] = gate_info
+        
+        return total_aux_loss, gate_info_dict
+    
+    def reset_moe_mlp_gate_info(self):
+        """重置MoE MLP层的门控信息"""
+        if self.moe_mlp_layers > 0:
+            vision_encoder = self.base_model.vision_model.encoder
+            layer_indices = list(range(6, 12))  # 后6层
+            
+            for layer_idx in layer_indices:
+                if layer_idx < len(vision_encoder.layers):
+                    layer = vision_encoder.layers[layer_idx]
+                    if isinstance(layer.mlp, MoEMLPLayer):
+                        layer.mlp.reset_gate_info()
+    
+    def compute_moe_mlp_global_aux_loss(self, accumulated_features):
+        """计算MoE MLP的global aux loss，每层分别计算并直接backward"""
+        if self.moe_mlp_layers <= 0 or not accumulated_features:
+            return
+        
+        vision_encoder = self.base_model.vision_model.encoder
+        layer_indices = list(range(6, 12))  # 后6层
+        detach_feature = self.moe_mlp_layers > 0
+        
+        # 准备所有模态的特征用于重新路由计算
+        all_rgb_feats = []
+        all_query_feats = []
+        
+        for feat_dict in accumulated_features:
+            all_rgb_feats.append(feat_dict['rgb_feats'])
+            all_query_feats.append(feat_dict['query_feats'])
+        
+        # 拼接所有模态特征
+        if all_rgb_feats and all_query_feats:
+            combined_rgb_feats = torch.cat(all_rgb_feats, dim=0)  # [total_batch, dim]
+            combined_query_feats = torch.cat(all_query_feats, dim=0)  # [total_batch, dim]
+            
+            # 对每一层MLP分别计算global aux loss
+            for layer_idx in layer_indices:
+                if layer_idx < len(vision_encoder.layers):
+                    layer = vision_encoder.layers[layer_idx]
+                    if isinstance(layer.mlp, MoEMLPLayer):
+                        # 使用detached特征重新进行余弦路由计算
+                        if detach_feature:
+                            rgb_input = combined_rgb_feats.detach()
+                            query_input = combined_query_feats.detach()
+                        else:
+                            rgb_input = combined_rgb_feats
+                            query_input = combined_query_feats
+                        
+                        # 对RGB特征进行MoE路由计算
+                        _ = layer.mlp(rgb_input, detach_feature=detach_feature)
+                        rgb_gate_info = layer.mlp.get_gate_info()
+                        
+                        # 对query特征进行MoE路由计算
+                        _ = layer.mlp(query_input, detach_feature=detach_feature)
+                        query_gate_info = layer.mlp.get_gate_info()
+                        
+                        # 计算该层的global aux loss（使用所有模态prob均值）
+                        if rgb_gate_info and query_gate_info:
+                            if 'probs' in rgb_gate_info and 'probs' in query_gate_info:
+                                # 计算所有模态概率的均值
+                                rgb_probs = rgb_gate_info['probs']  # [batch, num_experts]
+                                query_probs = query_gate_info['probs']  # [batch, num_experts]
+                                
+                                # 合并所有模态的概率分布
+                                all_probs = torch.cat([rgb_probs, query_probs], dim=0)  # [2*batch, num_experts]
+                                mean_probs = torch.mean(all_probs, dim=0)  # [num_experts]
+                                
+                                # 计算load balancing loss
+                                num_experts = mean_probs.size(0)
+                                expected_load = 1.0 / num_experts
+                                load_loss = torch.sum((mean_probs - expected_load) ** 2)
+                                
+                                # 应用权重并直接backward
+                                weighted_loss = load_loss * self.global_aux_loss_weight
+                                if weighted_loss.requires_grad:
+                                    weighted_loss.backward(retain_graph=True)
+                                
+                                print(f"Layer {layer_idx} MLP Global Aux Loss: {weighted_loss.item():.6f}")
+                        
+                        # 重置gate info为下一次计算准备
+                        layer.mlp.reset_gate_info()
 
     def _set_task(self): # 打印任务
         loss_names = self.args.loss_names
@@ -225,16 +345,30 @@ class IRRA(nn.Module):
                             
                             # 2.计算原始qg对比学习损失
                             qg_loss = objectives.compute_itc(i_feats, t_feats_modal, logit_scale) / len(query_feats)
+                            
+                            # 收集MoE MLP层的辅助损失
+                            moe_mlp_aux_loss, moe_mlp_gate_info = self.collect_moe_mlp_aux_loss()
+                            
                             # Add per-modal MoE auxiliary loss with reduced weight
                             ret.update({f'{modal_name}_itc_loss': qg_loss.detach()}) # detach后不带计算图, 小写l参与总损失计算        
                             ret.update({f'{modal_name}_itc_aux_loss': moe_aux_loss.detach()}) # detach后不带计算图, 小写l参与总损失计算        
-                            qg_loss = qg_loss + moe_aux_loss  # moe_aux_loss already weighted by moe_modal_aux_loss_weight
+                            ret.update({f'{modal_name}_moe_mlp_aux_loss': moe_mlp_aux_loss.detach()}) # MoE MLP辅助损失
+                            ret.update({f'{modal_name}_moe_mlp_gate_info': moe_mlp_gate_info}) # MoE MLP门控信息
+                            
+                            # 将MoE Adapter和MoE MLP的辅助损失都加入主损失
+                            qg_loss = qg_loss + moe_aux_loss + moe_mlp_aux_loss * self.modal_aux_loss_weight
                             # qg_loss = 0.8 * qg_loss
 
                         if self.autocast_dtype == torch.float16 and scaler is not None:
                             scaler.scale(qg_loss).backward()
                         else:
                             qg_loss.backward()
+                        
+                        # 计算MoE MLP的global aux loss（每层分别计算并直接backward）
+                        self.compute_moe_mlp_global_aux_loss(accumulated_features)
+                        
+                        # 重置MoE MLP门控信息
+                        self.reset_moe_mlp_gate_info()
 
                         multi_modal_contrastive_itc_loss += qg_loss
                     
@@ -344,19 +478,27 @@ class IRRA(nn.Module):
                                 i_feats, t_feats_modal
                             )
                             
+                            # 收集MoE MLP层的辅助损失
+                            moe_mlp_aux_loss, moe_mlp_gate_info = self.collect_moe_mlp_aux_loss()
+                            
                             # Store gate information for logging
                             ret.update({f'{modal_name}_gate_info': gate_info})
+                            ret.update({f'{modal_name}_moe_mlp_gate_info': moe_mlp_gate_info})
 
                             # 2.计算loss
                             loss = objectives.compute_sdm(i_feats, t_feats_modal, batch['pids'], logit_scale) / len(query_feats)
-                            # Add MoE auxiliary loss
-                            loss = loss + moe_aux_loss
+                            # Add MoE Adapter and MoE MLP auxiliary loss
+                            loss = loss + moe_aux_loss + moe_mlp_aux_loss * self.modal_aux_loss_weight
                         ret.update({f'{modal_name}_sdm_Loss': loss.detach()}) # .detach()后不带计算图, 大写L避免被计入总损失
                         # 根据精度类型决定是否使用scaler
                         if self.autocast_dtype == torch.float16 and scaler is not None:
                             scaler.scale(loss).backward()
                         else:
                             loss.backward()
+                        
+                        # 重置MoE MLP门控信息
+                        self.reset_moe_mlp_gate_info()
+                        
                         multi_modal_contrastive_sdm_loss += loss
                     # multi_modal_contrastive_sdm_loss.backward()
                     ret.update({'multi_modal_contrastive_sdm_loss': multi_modal_contrastive_sdm_loss.detach()})
@@ -435,16 +577,30 @@ class IRRA(nn.Module):
                             
                             # 2.计算原始qg对比学习损失
                             qg_loss = objectives.compute_itc(i_feats, t_feats_modal, logit_scale) / len(query_feats)
-                            # Add MoE auxiliary loss
-                            ret.update({f'{modal_name}_itc_loss': qg_loss.detach()}) # detach后不带计算图, 大写L避免被计入总损失        
-                            ret.update({f'{modal_name}_itc_aux_loss': moe_aux_loss.detach()}) # detach后不带计算图, 大写L避免被计入总损失        
-                            qg_loss = qg_loss + moe_aux_loss  # moe_aux_loss already weighted by moe_modal_aux_loss_weight
+                            
+                            # 收集MoE MLP层的辅助损失
+                            moe_mlp_aux_loss, moe_mlp_gate_info = self.collect_moe_mlp_aux_loss()
+                            
+                            # Add per-modal MoE auxiliary loss with reduced weight
+                            ret.update({f'{modal_name}_itc_loss': qg_loss.detach()}) # detach后不带计算图, 小写l参与总损失计算        
+                            ret.update({f'{modal_name}_itc_aux_loss': moe_aux_loss.detach()}) # detach后不带计算图, 小写l参与总损失计算        
+                            ret.update({f'{modal_name}_moe_mlp_aux_loss': moe_mlp_aux_loss.detach()}) # MoE MLP辅助损失
+                            ret.update({f'{modal_name}_moe_mlp_gate_info': moe_mlp_gate_info}) # MoE MLP门控信息
+                            
+                            # 将MoE Adapter和MoE MLP的辅助损失都加入主损失
+                            qg_loss = qg_loss + moe_aux_loss + moe_mlp_aux_loss * self.modal_aux_loss_weight
                             # qg_loss = 0.8 * qg_loss
 
                         if self.autocast_dtype == torch.float16 and scaler is not None:
                             scaler.scale(qg_loss).backward()
                         else:
                             qg_loss.backward()
+                        
+                        # 计算MoE MLP的global aux loss（每层分别计算并直接backward）
+                        self.compute_moe_mlp_global_aux_loss(accumulated_features)
+                        
+                        # 重置MoE MLP门控信息
+                        self.reset_moe_mlp_gate_info()
 
 
                         multi_modal_contrastive_itc_loss += qg_loss
@@ -708,6 +864,64 @@ class IRRA(nn.Module):
             ret.update({'mlm_acc': acc})
 
         return ret
+
+
+def copy_mlp_weights_to_moe(original_mlp, moe_mlp, num_experts):
+    """将原始CLIPMLP权重复制到所有MoE专家"""
+    if moe_mlp.use_moe:
+        for i in range(num_experts):
+            # 复制fc1权重到每个专家
+            moe_mlp.mlp.experts[i].fc1.weight.data.copy_(original_mlp.fc1.weight.data)
+            if hasattr(original_mlp.fc1, 'bias') and original_mlp.fc1.bias is not None:
+                moe_mlp.mlp.experts[i].fc1.bias.data.copy_(original_mlp.fc1.bias.data)
+            # 复制fc2权重到每个专家  
+            moe_mlp.mlp.experts[i].fc2.weight.data.copy_(original_mlp.fc2.weight.data)
+            if hasattr(original_mlp.fc2, 'bias') and original_mlp.fc2.bias is not None:
+                moe_mlp.mlp.experts[i].fc2.bias.data.copy_(original_mlp.fc2.bias.data)
+
+
+def replace_vision_mlp_with_moe(model, layer_indices=None, num_experts=8, top_k=2, temperature=1.0):
+    """将指定层的CLIPMLP替换为MoEMLPLayer"""
+    if layer_indices is None or len(layer_indices) == 0:
+        return  # 如果没有指定层或为空列表，则不进行替换
+    
+    # 确保模型有vision_model.encoder.layers结构
+    if not (hasattr(model, 'base_model') and 
+            hasattr(model.base_model, 'vision_model') and 
+            hasattr(model.base_model.vision_model, 'encoder') and 
+            hasattr(model.base_model.vision_model.encoder, 'layers')):
+        print("Warning: Model structure does not support MoE MLP replacement")
+        return
+    
+    total_layers = len(model.base_model.vision_model.encoder.layers)
+    
+    for layer_idx in layer_indices:
+        if layer_idx < total_layers:
+            original_mlp = model.base_model.vision_model.encoder.layers[layer_idx].mlp
+            
+            # 获取原始MLP的配置
+            d_model = original_mlp.config.hidden_size
+            d_ff = original_mlp.config.intermediate_size
+            
+            # 创建MoE MLP层
+            moe_mlp = MoEMLPLayer(
+                d_model=d_model, 
+                d_ff=d_ff, 
+                num_experts=num_experts, 
+                top_k=top_k, 
+                temperature=temperature,
+                use_moe=True
+            )
+            
+            # 参数复制逻辑
+            copy_mlp_weights_to_moe(original_mlp, moe_mlp, num_experts)
+            
+            # 替换层
+            model.base_model.vision_model.encoder.layers[layer_idx].mlp = moe_mlp
+            
+            print(f"Replaced layer {layer_idx} MLP with MoE MLP (experts={num_experts}, top_k={top_k})")
+        else:
+            print(f"Warning: Layer index {layer_idx} exceeds total layers {total_layers}")
 
 
 def build_model(args, num_classes=11003):

@@ -70,6 +70,7 @@ def get_args():
     parser.add_argument("--moe_top_k", type=int, default=6, help="top-k experts to select in MoE layer")
     parser.add_argument("--moe_modal_aux_loss_weight", type=float, default=0.3, help="auxiliary loss weight for per-modal MoE losses")
     parser.add_argument("--moe_global_aux_loss_weight", type=float, default=0.7, help="auxiliary loss weight for global MoE loss")
+    parser.add_argument("--moe_mlp_layers", type=int, default=6, help="number of layers to replace with MoE MLP in vision transformer (0 means no MoE MLP replacement)")
 
     ######################## loss settings ########################
     parser.add_argument("--loss_names", default='sdm+id', help="which loss to use ['mlm', 'cmpm', 'id', 'itc', 'sdm']")

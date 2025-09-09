@@ -15,7 +15,7 @@ from model import build_model
 from utils.metrics import Evaluator, Evaluator_OR
 from utils.options import get_args
 from utils.comm import get_rank, synchronize
-import wandb
+# import wandb
 
 
 def set_seed(seed=0):
@@ -34,25 +34,25 @@ if __name__ == '__main__':
     name = args.name
     run_name = f'{time.strftime("%Y%m%d_%H%M%S", time.localtime())}_trainmodel'
     
-    # 确保使用脚本中指定的 wandb 配置
-    wandb_api_key = 'd53fab2389359528c14559bd90286e6c72876be0'
-    wandb_project = 'prcv_wandb'
-    wandb_entity = None # 可以在bash脚本中设置
+    # # 确保使用脚本中指定的 wandb 配置
+    # wandb_api_key = 'd53fab2389359528c14559bd90286e6c72876be0'
+    # wandb_project = 'prcv_wandb'
+    # wandb_entity = None # 可以在bash脚本中设置
     
-    # 通过环境变量临时设置 API key，避免全局登录
-    # original_wandb_key = os.environ.get('WANDB_API_KEY')
-    os.environ['WANDB_API_KEY'] = wandb_api_key
+    # # 通过环境变量临时设置 API key，避免全局登录
+    # # original_wandb_key = os.environ.get('WANDB_API_KEY')
+    # os.environ['WANDB_API_KEY'] = wandb_api_key
     
-    # 直接在 wandb.init() 中指定配置
-    wandb_config = {
-        'project': wandb_project,
-        'name': run_name
-    }
-    if wandb_entity:
-        wandb_config['entity'] = wandb_entity
+    # # 直接在 # wandb.init() 中指定配置
+    # wandb_config = {
+    #     'project': wandb_project,
+    #     'name': run_name
+    # }
+    # if wandb_entity:
+    #     wandb_config['entity'] = wandb_entity
     
-    # 初始化 wandb，不需要显式登录
-    wandb.init(**wandb_config)
+    # # 初始化 wandb，不需要显式登录
+    # # wandb.init(**wandb_config)
     
     num_gpus = int(os.environ["WORLD_SIZE"]) if "WORLD_SIZE" in os.environ else 1
     args.distributed = num_gpus > 1
@@ -68,8 +68,8 @@ if __name__ == '__main__':
     # args.output_dir = op.join(args.output_dir, args.dataset_name, f'{cur_time}_{name}')
     args.output_dir = op.join(args.output_dir, args.dataset_name, f'a800')
     logger = setup_logger('IRRA', save_dir=args.output_dir, if_train=args.training, distributed_rank=get_rank())
-    wandb.log({"message": "Using {} GPUs".format(num_gpus)})
-    wandb.log({"message": str(args).replace(',', '\n')})
+    # wandb.log({"message": "Using {} GPUs".format(num_gpus)})
+    # wandb.log({"message": str(args).replace(',', '\n')})
 
     save_train_configs(args.output_dir, args)
 
@@ -78,7 +78,7 @@ if __name__ == '__main__':
     model = build_model(args, num_classes) # num_classes是训练集中行人的身份数量
     logger.info('Total params: %2.fM' % (sum(p.numel() for p in model.parameters()) / 1000000.0))
     total_params = sum(p.numel() for p in model.parameters()) / 1000000.0
-    wandb.log({"message": f"Total params: {total_params:.2f}M"})
+    # wandb.log({"message": f"Total params: {total_params:.2f}M"})
     
     model.to(device)
 
@@ -138,7 +138,7 @@ if __name__ == '__main__':
                 model.to(device)
     else:
         logger.info("Start training without loading checkpoint")
-        wandb.log({"message": "Start training without loading checkpoint"})
+        # wandb.log({"message": "Start training without loading checkpoint"})
         if args.add_multimodal_layers:
             logger.info("Manually adding multimodal embedding layers")
             modalities = ['vis', 'sk', 'nir', 'cp']
@@ -160,4 +160,4 @@ if __name__ == '__main__':
         evaluator = Evaluator(val_img_loader, val_txt_loader)
     
     do_train(start_epoch, args, model, train_loader, evaluator, optimizer, scheduler, checkpointer)
-    wandb.finish()
+    # wandb.finish()

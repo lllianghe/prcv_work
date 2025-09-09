@@ -8,7 +8,7 @@ from torch.utils.tensorboard import SummaryWriter
 from prettytable import PrettyTable
 import matplotlib.pyplot as plt
 import os
-import wandb
+# import wandb
 
 from torch.amp import GradScaler
 
@@ -141,7 +141,7 @@ def do_train(start_epoch, args, model, train_loader, evaluator, optimizer,
     arguments["iteration"] = 0
 
     logger = logging.getLogger("IRRA.train")
-    wandb.log({"message": "start training"})
+    # wandb.log({"message": "start training"})
 
     # meters是计量器可自动更新 平均值
     meters = {
@@ -324,7 +324,7 @@ def do_train(start_epoch, args, model, train_loader, evaluator, optimizer,
                         info_str += f", {k}: {v.avg:.4f}"
                 info_str += f", Base Lr: {scheduler.get_lr()[0]:.2e}"
                 logger.info(info_str)
-                wandb.log({"message": info_str})
+                # wandb.log({"message": info_str})
             
             # 只在实际执行optimizer.step()时调度学习率
             if  (n_iter + 1) % (scheduler_period) == 0:
@@ -348,12 +348,12 @@ def do_train(start_epoch, args, model, train_loader, evaluator, optimizer,
                 "Epoch {} done. Time per batch: {:.3f}[s] Speed: {:.1f}[samples/s]"
                 .format(epoch, time_per_batch,
                         train_loader.batch_size / time_per_batch))
-            wandb.log({"message": f"Epoch {epoch} done. Time per batch: {time_per_batch:.3f}[s] Speed: {train_loader.batch_size / time_per_batch:.1f}[samples/s]"})
+            # wandb.log({"message": f"Epoch {epoch} done. Time per batch: {time_per_batch:.3f}[s] Speed: {train_loader.batch_size / time_per_batch:.1f}[samples/s]"})
         # evalue
         if epoch % eval_period == 0 and args.test_size > 0:
             if get_rank() == 0:
                 logger.info("Validation Results - Epoch: {}".format(epoch))
-                wandb.log({"message": f"Validation Results - Epoch: {epoch}"})
+                # wandb.log({"message": f"Validation Results - Epoch: {epoch}"})
                 if args.distributed:
                     r1, mAP, single_modal_mAPs = evaluator.eval(model.module.eval())
                 else:
@@ -379,7 +379,7 @@ def do_train(start_epoch, args, model, train_loader, evaluator, optimizer,
                     arguments["best_mAP_epoch"] = epoch
                     checkpointer.save("best", **arguments)
                 logger.info(f"best mAP: {best_mAP} at epoch {arguments['best_mAP_epoch']}")
-                wandb.log({"message": f"best mAP: {best_mAP} at epoch {arguments['best_mAP_epoch']}"})
+                # wandb.log({"message": f"best mAP: {best_mAP} at epoch {arguments['best_mAP_epoch']}"})
                 """
                 """
                 if epoch >= 500 and epoch % 150 == 0:
@@ -389,7 +389,7 @@ def do_train(start_epoch, args, model, train_loader, evaluator, optimizer,
         if epoch == num_epoch:
             arguments["best_mAP_epoch"] = epoch
             checkpointer.save("best", **arguments)
-            wandb.log({"message": "save success"})
+            # wandb.log({"message": "save success"})
                 
                         
 

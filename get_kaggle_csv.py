@@ -24,7 +24,7 @@ from utils.kaggle import get_query_type_idx_range
 from datasets.bases_or import tokenize
 import torch.nn.functional as F
 import csv
-import wandb
+# import wandb
 
 class KaggleInputDataset(Dataset):
     def __init__(self, json_path,begin_idx,end_idx, transform):
@@ -172,24 +172,25 @@ if __name__ == '__main__':
     # 初始化 W&B 运行（如果尚未初始化）
     run_name = f'{time.strftime("%Y%m%d_%H%M%S", time.localtime())}_csv'
     # 确保使用脚本中指定的 wandb 配置
-    wandb_api_key = 'd53fab2389359528c14559bd90286e6c72876be0'
-    wandb_project = 'prcv_wandb'
-    wandb_entity = None # 可以在bash脚本中设置
+    # wandb_api_key = 'd53fab2389359528c14559bd90286e6c72876be0'
+    # wandb_project = 'prcv_wandb'
+    # wandb_entity = None # 可以在bash脚本中设置
     
-    # 通过环境变量临时设置 API key，避免全局登录
-    # original_wandb_key = os.environ.get('WANDB_API_KEY')
-    os.environ['WANDB_API_KEY'] = wandb_api_key
+    # # 通过环境变量临时设置 API key，避免全局登录
+    # # original_wandb_key = os.environ.get('WANDB_API_KEY')
+    # os.environ['WANDB_API_KEY'] = wandb_api_key
     
-    # 直接在 wandb.init() 中指定配置
-    wandb_config = {
-        'project': wandb_project,
-        'name': run_name
-    }
-    if wandb_entity:
-        wandb_config['entity'] = wandb_entity
+    # # 直接在 # wandb.init() 中指定配置
+    # wandb_config = {
+    #     'project': wandb_project,
+    #     'name': run_name
+    # }
+    # if wandb_entity:
+    #     wandb_config['entity'] = wandb_entity
     
     # 初始化 wandb，不需要显式登录
-    wandb.init(**wandb_config)
+    # wandb.init(**wandb_config)
+    
     parser = argparse.ArgumentParser(description="irra Test")
     # 把对应model的file放这就行了
     parser.add_argument("--config_file", default=
@@ -251,18 +252,18 @@ if __name__ == '__main__':
                     'ranking_list_idx': ranking_list_idx
                 })
             print(f"{current_query_type} success")
-            wandb.log({"message": f"{current_query_type} success"})
+            # wandb.log({"message": f"{current_query_type} success"})
     print("generate csv file success!")
 
-# 创建一个 Artifact 并上传 CSV 文件
-artifact = wandb.Artifact(
-    name="ranking_results",  # Artifact 名称
-    type="results",         # 类型（自定义，如 dataset/model/results）
-    description="CSV file containing query ranking results"
-)
-artifact.add_file(output_file)  # 添加本地文件
+# # 创建一个 Artifact 并上传 CSV 文件
+# artifact = # wandb.Artifact(
+#     name="ranking_results",  # Artifact 名称
+#     type="results",         # 类型（自定义，如 dataset/model/results）
+#     description="CSV file containing query ranking results"
+# )
+# artifact.add_file(output_file)  # 添加本地文件
 
 # 上传到 W&B 云端
-wandb.log_artifact(artifact)
-print("CSV 文件已上传到 W&B Artifacts！")
-wandb.finish()
+# wandb.log_artifact(artifact)
+# print("CSV 文件已上传到 W&B Artifacts！")
+# wandb.finish()

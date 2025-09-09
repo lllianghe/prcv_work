@@ -4,7 +4,7 @@ import numpy as np
 import os
 import torch.nn.functional as F
 import logging
-import wandb
+# import wandb
 
 
 def rank(similarity, q_pids, g_pids, max_rank=10, get_mAP=True):
@@ -99,7 +99,7 @@ class Evaluator():
         table.custom_format["mINP"] = lambda f, v: f"{v:.3f}" if isinstance(v, (int, float)) else str(v)
         table.hrules = 1
         self.logger.info('\n' + str(table))
-        wandb.log({"message": f"\n{str(table)}"})
+        # wandb.log({"message": f"\n{str(table)}"})
         return t2i_cmc[0]
 
 
@@ -250,6 +250,6 @@ class Evaluator_OR():
                 modal_name = row[0].split('_')[1]  # 提取模态名称
                 single_modal_mAPs[modal_name] = row[4]  # mAP值在第5列（索引4）
         
-        wandb.log({"message": f"\n{str(table)}"})
+        # wandb.log({"message": f"\n{str(table)}"})
         return avg_r1, avg_mAP, single_modal_mAPs
 

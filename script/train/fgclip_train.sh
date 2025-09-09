@@ -20,7 +20,9 @@ python train.py \
 --step_size 2000 \
 --add_multimodal_layers \
 --img_size 224,224 \
---num_epoch 1000 \
+--num_epoch 800 \
 --lr 5e-6 \
 --ln_lr 2e-2 \
 --weight_decay 4e-5 \
+--lora_backbone_lr 1e-6 \
+--lora_lr 1e-1 \

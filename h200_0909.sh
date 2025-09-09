@@ -1,3 +1,5 @@
+NAME="你必须填写一个name 格式如 09091834_loralre7"
+
 set -e  # 任何命令失败时退出脚本
 source /root/miniconda3/etc/profile.d/conda.sh
 conda activate pytorch-hzc
@@ -23,7 +25,7 @@ CUDA_VISIBLE_DEVICES=6 python train.py \
 --img_aug \
 --MLM \
 --dataset_name "ORBench" \
---name fgclip \
+--name "$NAME" \
 --root_dir '/root/worker_gpfs/hzc-comp/prcv_data' \
 --warmup_epochs 580 \
 --lrscheduler exp \
@@ -41,6 +43,7 @@ CUDA_VISIBLE_DEVICES=6 python train.py \
 # 生成kaggle csv
 echo "$(date): 开始生成CSV"
 CUDA_VISIBLE_DEVICES=6 \
-python get_kaggle_csv.py || { echo "生成CSV失败"; exit 1; }
+python get_kaggle_csv.py \
+--config_file "logs/ORBench/h200_${NAME}/configs.yaml"
 
 echo "$(date): a800脚本运行完成"

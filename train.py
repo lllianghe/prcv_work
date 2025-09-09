@@ -66,7 +66,7 @@ if __name__ == '__main__':
     device = "cuda"
     cur_time = time.strftime("%Y%m%d_%H%M%S", time.localtime())
     # args.output_dir = op.join(args.output_dir, args.dataset_name, f'{cur_time}_{name}')
-    args.output_dir = op.join(args.output_dir, args.dataset_name, f'a800')
+    args.output_dir = op.join(args.output_dir, args.dataset_name, f'h200_{name}')
     logger = setup_logger('IRRA', save_dir=args.output_dir, if_train=args.training, distributed_rank=get_rank())
     # wandb.log({"message": "Using {} GPUs".format(num_gpus)})
     # wandb.log({"message": str(args).replace(',', '\n')})

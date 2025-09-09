@@ -1,33 +1,35 @@
-from prettytable import PrettyTable
-import os
+import argparse
 import torch
+import torch.nn.functional as F
 import numpy as np
+import os
 import time
 import os.path as op
+
+from transformers.models.auto.feature_extraction_auto import get_feature_extractor_config
 from utils.metrics import Evaluator, Evaluator_OR
+import csv
+from prettytable import PrettyTable
+from utils.metrics import Evaluator, Evaluator_OR, rank_with_distance
 from datasets import build_dataloader
 from processor.processor import do_inference
 from utils.checkpoint import Checkpointer
 from utils.logger import setup_logger
 from model import build_model
-from utils.metrics import Evaluator
 from torch.utils.data import DataLoader
-import argparse
 from PIL import Image
 from utils.iotools import load_train_configs
 from torch.utils.data import Dataset
 from datasets.build import build_transforms
 from utils.iotools import read_image
 from utils.simple_tokenizer import SimpleTokenizer
-import json
 from utils.kaggle import get_query_type_idx_range
 from datasets.bases_or import tokenize
-import torch.nn.functional as F
-import csv
-# import wandb
+from utils.re_ranking import fast_gcrv_image
+from utils.cmc import ReRank
 
 class KaggleInputDataset(Dataset):
-    def __init__(self, json_path,begin_idx,end_idx, transform):
+    def __init__(self, json_path, begin_idx, end_idx, transform):
         self.begin_idx = begin_idx
         self.end_idx = end_idx
         self.json_path = json_path
@@ -39,12 +41,13 @@ class KaggleInputDataset(Dataset):
 
     def load_data(self):
         with open(self.json_path, 'r') as f:
+            import json
             data = json.load(f)
         return data
     
     def __getitem__(self, idx):
         nir_img, cp_img, sk_img, caption = None, None, None, None
-        query = self.data[idx + begin_idx]
+        query = self.data[idx + self.begin_idx]  # 修正：使用 self.begin_idx
         query_idx = query['query_idx']
         query_type = query['query_type']
         content = query['content']
@@ -60,7 +63,7 @@ class KaggleInputDataset(Dataset):
                 cp_image_path = content[i]
             elif modal == 'SK' and i < len(content):
                 sk_image_path = content[i]
-        folder_path = '/fs-computility/ai-shen/macaoyuan.p/hzc/PRCV/ORBench_PRCV/val' 
+        folder_path = '/root/worker_gpfs/hzc-comp/prcv_data/ORBench_PRCV/val' 
         nir_image = read_image(os.path.join(folder_path, nir_image_path)) if nir_image_path else None
         cp_image = read_image(os.path.join(folder_path, cp_image_path)) if cp_image_path else None
         sk_image = read_image(os.path.join(folder_path, sk_image_path)) if sk_image_path else None
@@ -80,13 +83,14 @@ class KaggleInputDataset(Dataset):
         return query_idx, query_type, cp_img, sk_img, nir_img, caption
     
     def __len__(self):
-        return end_idx - begin_idx + 1
+        return self.end_idx - self.begin_idx + 1  # 修正：使用 self.end_idx 和 self.begin_idx
 
 class GalleryDataset(Dataset):
     def __init__(self, img_folder, transform):
         self.img_folder = img_folder
         self.transform = transform
         self.img_files = [f for f in os.listdir(img_folder) if f.endswith('.jpg')]
+        
     def __getitem__(self, idx):
         img_path = os.path.join(self.img_folder, f"{idx+1}.jpg")
         img = read_image(img_path)
@@ -96,12 +100,13 @@ class GalleryDataset(Dataset):
 
     def __len__(self):
         return len(self.img_files)
-def embedding_qfeats(model, query_loader,modalities):
+
+def embedding_qfeats(model, query_loader, modalities):
     model = model.eval()
     device = next(model.parameters()).device
     modalities_list = modalities.split("_") 
 
-    qids, gids, qfeats, gfeats = [], [], [], []
+    qfeats = []
     for query_idx, query_type, cp_img, sk_img, nir_img, caption in query_loader:
         with torch.no_grad():
             feats = []
@@ -124,7 +129,7 @@ def embedding_qfeats(model, query_loader,modalities):
                 nir_img = nir_img.to(device)
                 nir_feat = model.encode_image(nir_img,'nir')
                 feats.append(nir_feat)
-        img_feats = sum(feats) / len(feats) if feats else None  # 避免空列表除以0的错误
+        img_feats = sum(feats) / len(feats) if feats else None
         qfeats.append(img_feats)  
     qfeats = torch.cat(qfeats, 0)
     return qfeats
@@ -141,13 +146,14 @@ def embedding_gfeats(model, test_gallery_loader):
     gfeats = torch.cat(gfeats, 0)
     return gfeats
 
-def embedding_gfeats_with_multiembeddings(model, test_gallery_loader):
+def embedding_gfeats_with_multiembeddings(model, test_gallery_loader, use_multimodal_layers_in_pairs):
     model = model.eval()
     device = next(model.parameters()).device
     
-    gfeats_dict = {'TEXT': [], 'CP': [], 'SK': [], 'NIR': []}
+    gfeats_dict = {'TEXT': [], 'CP': [], 'SK': [], 'NIR': [], 'VIS': []}
     for idx, img in test_gallery_loader:
         with torch.no_grad():
+            if use_multimodal_layers_in_pairs:
                 # TEXT
                 img = img.to(device)
                 text_feat = model.encode_image(img, modality='vis')
@@ -161,109 +167,328 @@ def embedding_gfeats_with_multiembeddings(model, test_gallery_loader):
                 # NIR
                 nir_feat = model.encode_image(img, modality='nir')
                 gfeats_dict['NIR'].append(nir_feat)
+            else:
+                img = img.to(device)
+                text_feat = model.encode_image(img, modality='vis')
+                gfeats_dict['VIS'].append(text_feat)
+
     for modality in gfeats_dict:
         if gfeats_dict[modality] and len(gfeats_dict[modality]) > 0:
-                gfeats_dict[modality] = torch.cat(gfeats_dict[modality], 0)
+            gfeats_dict[modality] = torch.cat(gfeats_dict[modality], 0)
     return gfeats_dict
-            
 
+def apply_single_reranking(qfeats, gfeats, rerank_method, rerank_cfg=None, logger=None):
+    """
+    应用单个重排序方法
+    """
+    try:
+        if rerank_method == 'none' or rerank_method is None:
+            # 原始相似度排序
+            similarity = qfeats @ gfeats.t()
+            indices = torch.argsort(similarity, dim=1, descending=True)
+            return indices
+        
+        elif rerank_method == 'rerank':
+            # K-reciprocal re-ranking
+            k1 = rerank_cfg.get('k1', 20) if rerank_cfg else 20
+            k2 = rerank_cfg.get('k2', 6) if rerank_cfg else 6
+            lambda_value = rerank_cfg.get('lambda_value', 0.3) if rerank_cfg else 0.3
+            
+            if logger:
+                logger.info(f"Applying k-reciprocal re-ranking with k1={k1}, k2={k2}, lambda={lambda_value}")
+            
+            dist_matrix = ReRank(qfeats.cpu().numpy(), gfeats.cpu().numpy(), 
+                               k1=k1, k2=k2, lambda_value=lambda_value)
+            indices = torch.from_numpy(np.argsort(dist_matrix, axis=1))
+            return indices
+        
+        elif rerank_method == 'gcr':
+            # GCR re-ranking
+            if rerank_cfg is None:
+                if logger:
+                    logger.error("GCR configuration is required for GCR re-ranking")
+                return None
+            
+            if logger:
+                logger.info("Applying GCR re-ranking")
+            
+            # 准备GCR需要的数据格式
+            qfeats_np = qfeats.cpu()
+            gfeats_np = gfeats.cpu()
+            
+            # 创建伪ID和tracks（竞赛中不需要真实的ID）
+            qids_np = np.arange(qfeats.shape[0])
+            gids_np = np.arange(gfeats.shape[0])
+            qids_tracks = np.zeros_like(qids_np)
+            gids_tracks = np.zeros_like(gids_np)
+            
+            all_data = [qfeats_np, qids_np, qids_tracks, gfeats_np, gids_np, gids_tracks]
+            dist_matrix, _, _ = fast_gcrv_image(rerank_cfg, all_data)
+            indices = torch.from_numpy(np.argsort(dist_matrix, axis=1))
+            return indices
+        
+        else:
+            if logger:
+                logger.error(f"Unknown rerank method: {rerank_method}")
+            return None
+            
+    except Exception as e:
+        if logger:
+            logger.error(f"Error in {rerank_method} re-ranking: {str(e)}")
+        return None
+
+def apply_reranking(qfeats, gfeats, rerank_methods, rerank_cfg=None, logger=None):
+    """
+    应用重排序方法，支持多种方法
+    """
+    if isinstance(rerank_methods, str):
+        rerank_methods = [rerank_methods]
+    
+    results = {}
+    for method in rerank_methods:
+        if logger:
+            logger.info(f"Processing with method: {method}")
+        
+        # 为GCR设置特定的配置
+        if method == 'gcr':
+            gcr_cfg = rerank_cfg.get('gcr_cfg') if rerank_cfg else None
+        else:
+            gcr_cfg = rerank_cfg
+        
+        indices = apply_single_reranking(qfeats, gfeats, method, gcr_cfg, logger)
+        if indices is not None:
+            results[method] = indices
+        else:
+            if logger:
+                logger.error(f"Failed to apply {method} re-ranking")
+    
+    return results
 
 if __name__ == '__main__':
-    # 初始化 W&B 运行（如果尚未初始化）
-    run_name = f'{time.strftime("%Y%m%d_%H%M%S", time.localtime())}_csv'
-    # 确保使用脚本中指定的 wandb 配置
-    # wandb_api_key = 'd53fab2389359528c14559bd90286e6c72876be0'
-    # wandb_project = 'prcv_wandb'
-    # wandb_entity = None # 可以在bash脚本中设置
-    
-    # # 通过环境变量临时设置 API key，避免全局登录
-    # # original_wandb_key = os.environ.get('WANDB_API_KEY')
-    # os.environ['WANDB_API_KEY'] = wandb_api_key
-    
-    # # 直接在 # wandb.init() 中指定配置
-    # wandb_config = {
-    #     'project': wandb_project,
-    #     'name': run_name
-    # }
-    # if wandb_entity:
-    #     wandb_config['entity'] = wandb_entity
-    
-    # 初始化 wandb，不需要显式登录
-    # wandb.init(**wandb_config)
-    
     parser = argparse.ArgumentParser(description="irra Test")
-    # 把对应model的file放这就行了
-    parser.add_argument("--config_file", default=
-                              'logs/ORBench/a800/configs.yaml'
-                    ) 
-    # parser.add_argument("--config_file", default='logs/ORBench/20250715_021439_irra/configs.yaml') #这是fgclip的模型
-    args = parser.parse_args()
-    args = load_train_configs(args.config_file)
+    # 配置文件路径
+    parser.add_argument("--config_file", default='') 
+    # 重排序方法选择
+    parser.add_argument("--rerank_method", type=str, default=None, 
+                       choices=[None, 'none', 'rerank', 'gcr', 'all'],
+                       help="Re-ranking method: None/none (original), 'rerank' (k-reciprocal), 'gcr', 'all' (run all methods)")
+    
+    # K-reciprocal 重排序参数
+    parser.add_argument("--rerank_k1", type=int, default=20,
+                       help="k1 parameter for k-reciprocal re-ranking")
+    parser.add_argument("--rerank_k2", type=int, default=6,
+                       help="k2 parameter for k-reciprocal re-ranking")
+    parser.add_argument("--rerank_lambda", type=float, default=0.3,
+                       help="lambda parameter for k-reciprocal re-ranking")
+    
+    # GCR 重排序参数 - 根据 re_ranking.py 中的需求补全
+    parser.add_argument("--gcr_enable", action='store_true', default=True,
+                       help="Enable GCR")
+    parser.add_argument("--gcr_gal_round", type=int, default=3,
+                       help="Gallery round for GCR (迭代轮数)")
+    parser.add_argument("--gcr_beta1", type=float, default=0.1,
+                       help="Beta1 parameter for GCR (相似度计算参数)")
+    parser.add_argument("--gcr_beta2", type=float, default=0.1,
+                       help="Beta2 parameter for GCR (相似度计算参数)")
+    parser.add_argument("--gcr_lambda1", type=float, default=2.0,
+                       help="Lambda1 parameter for GCR (阈值计算参数)")
+    parser.add_argument("--gcr_lambda2", type=float, default=2.0,
+                       help="Lambda2 parameter for GCR (阈值计算参数)")
+    parser.add_argument("--gcr_scale", type=float, default=1.0,
+                       help="Scale parameter for GCR (缩放参数)")
+    parser.add_argument("--gcr_mode", type=str, default='sym',
+                       choices=['sym', 'fixA', 'no-norm'],
+                       help="GCR mode (对称模式/固定A模式/无归一化模式)")
+    parser.add_argument("--gcr_with_gpu", action='store_true', default=True,
+                       help="Use GPU for GCR")
+    parser.add_argument("--gcr_verbose", action='store_true', default=False,
+                       help="Verbose output for GCR")
+    
+    # 先解析命令行参数
+    cmd_args = parser.parse_args()
+    
+    # 保存重排序相关的命令行参数
+    rerank_method = cmd_args.rerank_method
+    rerank_k1 = cmd_args.rerank_k1
+    rerank_k2 = cmd_args.rerank_k2
+    rerank_lambda = cmd_args.rerank_lambda
+    
+    # GCR 参数
+    gcr_enable = cmd_args.gcr_enable
+    gcr_gal_round = cmd_args.gcr_gal_round
+    gcr_beta1 = cmd_args.gcr_beta1
+    gcr_beta2 = cmd_args.gcr_beta2
+    gcr_lambda1 = cmd_args.gcr_lambda1
+    gcr_lambda2 = cmd_args.gcr_lambda2
+    gcr_scale = cmd_args.gcr_scale
+    gcr_mode = cmd_args.gcr_mode
+    gcr_with_gpu = cmd_args.gcr_with_gpu
+    gcr_verbose = cmd_args.gcr_verbose
+    
+    # 加载配置文件
+    args = load_train_configs(cmd_args.config_file)
     args.training = False
-    args.test_batch_size =256
+    args.test_batch_size = 256
+    
+    # 恢复重排序参数
+    args.rerank_method = rerank_method
+    args.rerank_k1 = rerank_k1
+    args.rerank_k2 = rerank_k2
+    args.rerank_lambda = rerank_lambda
+    
+    # 恢复 GCR 参数
+    args.gcr_enable = gcr_enable
+    args.gcr_gal_round = gcr_gal_round
+    args.gcr_beta1 = gcr_beta1
+    args.gcr_beta2 = gcr_beta2
+    args.gcr_lambda1 = gcr_lambda1
+    args.gcr_lambda2 = gcr_lambda2
+    args.gcr_scale = gcr_scale
+    args.gcr_mode = gcr_mode
+    args.gcr_with_gpu = gcr_with_gpu
+    args.gcr_verbose = gcr_verbose
+    
     logger = setup_logger('IRRA', save_dir=args.output_dir, if_train=args.training)
     logger.info(args)
+    logger.info(f"Rerank method from command line: {rerank_method}")
+    
+    # 确定要运行的重排序方法
+    if args.rerank_method == 'all':
+        rerank_methods = ['rerank', 'gcr','none']
+        logger.info("Running all re-ranking methods")
+    elif args.rerank_method in ['rerank', 'gcr']:
+        rerank_methods = [args.rerank_method]
+        logger.info(f"Running single re-ranking method: {args.rerank_method}")
+    else:
+        rerank_methods = ['none']
+        logger.info("Running original similarity ranking")
+
+    logger.info(f"Final rerank_method: {args.rerank_method}")
+    logger.info(f"Final rerank_methods list: {rerank_methods}")
+    
+    # 设置重排序配置
+    rerank_cfg = {
+        'k1': getattr(args, 'rerank_k1', 20),
+        'k2': getattr(args, 'rerank_k2', 6),
+        'lambda_value': getattr(args, 'rerank_lambda', 0.3),
+        'gcr_cfg': None
+    }
+    
+    # 设置GCR配置 - 包含所有必需参数
+    if 'gcr' in rerank_methods:
+        from types import SimpleNamespace
+        gcr_cfg = SimpleNamespace()
+        gcr_cfg.GCR = SimpleNamespace()
+        gcr_cfg.GCR.ENABLE_GCR = getattr(args, 'gcr_enable', True)
+        gcr_cfg.GCR.GAL_ROUND = getattr(args, 'gcr_gal_round', 3)
+        gcr_cfg.GCR.BETA1 = getattr(args, 'gcr_beta1', 0.1)
+        gcr_cfg.GCR.BETA2 = getattr(args, 'gcr_beta2', 0.1)
+        gcr_cfg.GCR.LAMBDA1 = getattr(args, 'gcr_lambda1', 2.0)
+        gcr_cfg.GCR.LAMBDA2 = getattr(args, 'gcr_lambda2', 2.0)
+        gcr_cfg.GCR.SCALE = getattr(args, 'gcr_scale', 1.0)
+        gcr_cfg.GCR.MODE = getattr(args, 'gcr_mode', 'sym')
+        gcr_cfg.GCR.WITH_GPU = getattr(args, 'gcr_with_gpu', True)
+        
+        gcr_cfg.COMMON = SimpleNamespace()
+        gcr_cfg.COMMON.VERBOSE = getattr(args, 'gcr_verbose', False)
+        
+        rerank_cfg['gcr_cfg'] = gcr_cfg
+        logger.info(f"GCR configuration: {vars(gcr_cfg.GCR)}")
+        logger.info(f"GCR COMMON configuration: {vars(gcr_cfg.COMMON)}")
+    
     device = "cuda"
-    json_file = '/fs-computility/ai-shen/macaoyuan.p/hzc/PRCV/ORBench_PRCV/val/val_queries.json'
+    json_file = '/root/worker_gpfs/hzc-comp/prcv_data/ORBench_PRCV/val/val_queries.json'
     query_type_ranges = get_query_type_idx_range(json_file)
     test_transforms = build_transforms(img_size=args.img_size,is_train=False)
-    test_gallery_dataset = GalleryDataset('/fs-computility/ai-shen/macaoyuan.p/hzc/PRCV/ORBench_PRCV/val/gallery',transform=test_transforms)
+    test_gallery_dataset = GalleryDataset('/root/worker_gpfs/hzc-comp/prcv_data/ORBench_PRCV/val/gallery',transform=test_transforms)
     test_gallery_loader = DataLoader(test_gallery_dataset, batch_size=args.test_batch_size, shuffle=False)
     
     model = build_model(args,num_classes=int(400*(1-args.test_size))) #num_class必须和之前构建的model中的num_class对应
+    # 根据参数分别控制multimodal embedding和projection层的初始化
+    add_embeddings = args.add_multimodal_embeddings or args.add_multimodal_layers
+    add_projections = args.add_multimodal_projections or args.add_multimodal_layers    
+    if add_embeddings:
+        # 初始化多模态embedding层
+        model.base_model.setup_multi_embeddings()
+    if add_projections:
+        # 初始化多模态projection层
+        model.base_model.setup_multi_projections()
+
     checkpointer = Checkpointer(model)
-    checkpointer.load(f=op.join(args.output_dir, 'best_1000.pth'))
+    checkpointer.load(f=op.join(args.output_dir, 'epoch_800.pth'))
     model.to(device)
     
-    if args.add_multimodal_layers:
-        gfeats_dict = embedding_gfeats_with_multiembeddings(model, test_gallery_loader)
-        print(f"embedding_gfeats_with_multiembeddings success")
-    else:
-        gfeats = embedding_gfeats(model, test_gallery_loader)
-        print(f"embedding_gfeats success")
-    json_file = '/fs-computility/ai-shen/macaoyuan.p/hzc/PRCV/ORBench_PRCV/val/val_queries.json'
+    # 判断是否使用多模态特征提取（需要同时有embedding和projection）
+    use_multimodal = add_embeddings and add_projections
+    # 统一使用 embedding_gfeats_with_multiembeddings，它会根据 use_multimodal_layers_in_pairs 参数处理回退逻辑
+    gfeats_dict = embedding_gfeats_with_multiembeddings(model, test_gallery_loader, args.use_multimodal_layers_in_pairs if use_multimodal else False)
+    print(f"embedding_gfeats_with_multiembeddings success")
+    json_file = '/root/worker_gpfs/hzc-comp/prcv_data/ORBench_PRCV/val/val_queries.json'
     query_type_ranges = get_query_type_idx_range(json_file)
-    output_file=op.join(args.output_dir, 'ranking_list_epoch_1000.csv')
-    with open(output_file, mode='w', newline='') as csvfile:
-        fieldnames = ['query_idx', 'query_type', 'ranking_list_idx']
-        writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
-        writer.writeheader()
+    
+    # 为每种重排序方法创建输出文件
+    output_files = {}
+    csv_writers = {}
+    csv_files = {}
+    
+    for method in rerank_methods:
+        output_suffix = f"_{method}" if method != 'none' else ""
+        output_file = op.join(args.output_dir, f'ranking_list{output_suffix}.csv')
+        output_files[method] = output_file
         
+        csv_file = open(output_file, mode='w', newline='')
+        csv_files[method] = csv_file
+        fieldnames = ['query_idx', 'query_type', 'ranking_list_idx']
+        writer = csv.DictWriter(csv_file, fieldnames=fieldnames)
+        writer.writeheader()
+        csv_writers[method] = writer
+    
+    try:
         for current_query_type, begin_idx, end_idx in query_type_ranges:
-            test_query_dataset = KaggleInputDataset('/fs-computility/ai-shen/macaoyuan.p/hzc/PRCV/ORBench_PRCV/val/val_queries.json', begin_idx, end_idx, test_transforms)
+            logger.info(f"Processing {current_query_type} (idx {begin_idx}-{end_idx})")
+            
+            test_query_dataset = KaggleInputDataset('/root/worker_gpfs/hzc-comp/prcv_data/ORBench_PRCV/val/val_queries.json', begin_idx, end_idx, test_transforms)
             test_query_loader = DataLoader(test_query_dataset, batch_size=args.test_batch_size, shuffle=False)
             qfeats = embedding_qfeats(model, test_query_loader, current_query_type)
             modalities_list = current_query_type.split("_") 
-            if args.add_multimodal_layers:
+            
+            # 根据 use_multimodal 和 use_multimodal_layers_in_pairs 选择 gallery 特征组合方式
+            if use_multimodal and args.use_multimodal_layers_in_pairs:
+                # 多模态且使用分支配对：组合对应的模态特征
                 gfeats_to_combine = [gfeats_dict[m] for m in modalities_list if m in gfeats_dict and len(gfeats_dict[m]) > 0]
                 if not gfeats_to_combine:
                     logger.warning(f"No features found for query type: {current_query_type}. Skipping.")
                     continue
                 gfeats = sum(gfeats_to_combine) / len(gfeats_to_combine)
+            else:
+                # 单模态或多模态但不使用分支配对：使用单一 VIS 特征
+                gfeats = gfeats_dict["VIS"]
             qfeats = F.normalize(qfeats, p=2, dim=1)  # 归一化
             gfeats = F.normalize(gfeats, p=2, dim=1)
-            similarity = qfeats @ gfeats.t()  # q * g
-            indices = torch.argsort(similarity, dim=1, descending=True)  # 排序
-            for i, query_idx in enumerate(range(begin_idx, end_idx + 1)):
-                ranking_list_idx = (indices[i, :100].cpu().numpy() + 1).tolist()   # 获取前 100 个索引
-                writer.writerow({
-                    'query_idx': query_idx+1,
-                    'query_type': current_query_type,
-                    'ranking_list_idx': ranking_list_idx
-                })
-            print(f"{current_query_type} success")
-            # wandb.log({"message": f"{current_query_type} success"})
-    print("generate csv file success!")
-
-# # 创建一个 Artifact 并上传 CSV 文件
-# artifact = # wandb.Artifact(
-#     name="ranking_results",  # Artifact 名称
-#     type="results",         # 类型（自定义，如 dataset/model/results）
-#     description="CSV file containing query ranking results"
-# )
-# artifact.add_file(output_file)  # 添加本地文件
-
-# 上传到 W&B 云端
-# wandb.log_artifact(artifact)
-# print("CSV 文件已上传到 W&B Artifacts！")
-# wandb.finish()
+            
+            # 应用重排序
+            results = apply_reranking(qfeats, gfeats, rerank_methods, rerank_cfg, logger)
+            
+            if not results:
+                logger.error(f"All re-ranking methods failed for {current_query_type}")
+                continue
+            
+            # 为每种方法写入结果
+            for method, indices in results.items():
+                for i, query_idx in enumerate(range(begin_idx, end_idx + 1)):
+                    ranking_list_idx = (indices[i, :100].cpu().numpy() + 1).tolist()
+                    csv_writers[method].writerow({
+                        'query_idx': query_idx+1,
+                        'query_type': current_query_type,
+                        'ranking_list_idx': ranking_list_idx
+                    })
+            
+            logger.info(f"{current_query_type} completed successfully with {len(results)} methods")
+    
+    finally:
+        # 关闭所有文件
+        for csv_file in csv_files.values():
+            csv_file.close()
+    
+    for method, output_file in output_files.items():
+        logger.info(f"CSV file for {method} generated successfully: {output_file}")

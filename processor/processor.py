@@ -212,14 +212,16 @@ def do_train(start_epoch, args, model, train_loader, evaluator, optimizer,
     autocast_dtype = args.autocast_dtype
     use_scaler = autocast_dtype == torch.float16
     scaler = GradScaler() if use_scaler else None
-
+    loss_20epoch = 0
     # train
     for epoch in range(start_epoch, num_epoch + 1):
+        if (epoch - 1) % 20 == 0:
+            loss_20epoch = 0 
         start_time = time.time()
         for meter in meters.values():
             meter.reset()
         model.train()
-
+        epoch_total_loss = 0
         for n_iter, batch in enumerate(train_loader):
             batch = {k: v.to(device) for k, v in batch.items()}
             
@@ -382,7 +384,7 @@ def do_train(start_epoch, args, model, train_loader, evaluator, optimizer,
                 # wandb.log({"message": f"best mAP: {best_mAP} at epoch {arguments['best_mAP_epoch']}"})
                 """
                 
-        if epoch >= 600 and epoch % 200 == 0:
+        if epoch >= 400 and epoch % 200 == 0:
             checkpointer.save(f"best_{epoch}", **arguments)
                 
 
@@ -391,6 +393,10 @@ def do_train(start_epoch, args, model, train_loader, evaluator, optimizer,
             checkpointer.save("best", **arguments)
             logger.info("save the last success")
             # wandb.log({"message": "save success"})
+        
+        loss_20epoch += meters['multi_modal_contrastive_itc_loss'].avg
+        if epoch % 20 == 0:
+            logger.info(f"epoch{epoch-19} to epoch {epoch} avg_loss20: {loss_20epoch/20}")
                 
                         
 

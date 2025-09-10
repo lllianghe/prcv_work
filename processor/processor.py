@@ -381,10 +381,10 @@ def do_train(start_epoch, args, model, train_loader, evaluator, optimizer,
                 logger.info(f"best mAP: {best_mAP} at epoch {arguments['best_mAP_epoch']}")
                 # wandb.log({"message": f"best mAP: {best_mAP} at epoch {arguments['best_mAP_epoch']}"})
                 """
-                """
-                if epoch >= 500 and epoch % 150 == 0:
-                    checkpointer.save(f"best_{epoch}", **arguments)
-                """
+                
+        if epoch >= 600 and epoch % 200 == 0:
+            checkpointer.save(f"best_{epoch}", **arguments)
+                
 
         if epoch == num_epoch:
             arguments["best_mAP_epoch"] = epoch

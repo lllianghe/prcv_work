@@ -389,6 +389,7 @@ def do_train(start_epoch, args, model, train_loader, evaluator, optimizer,
         if epoch == num_epoch:
             arguments["best_mAP_epoch"] = epoch
             checkpointer.save("best", **arguments)
+            logger.info("save the last success")
             # wandb.log({"message": "save success"})
                 
                         

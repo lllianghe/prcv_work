@@ -1,9 +1,17 @@
-#!/bin/bash
+NAME="id600_4"
+
 set -e  # 任何命令失败时退出脚本
 source /root/miniconda3/etc/profile.d/conda.sh
 conda activate pytorch-hzc
 echo "当前 Conda 环境: $CONDA_DEFAULT_ENV"
 echo "当前 Python 路径: $(which python)"
+
+# 同步代码
+cd /root/worker_gpfs/hzc-comp/prcv_data/prcv_work
+git checkout a800
+git pull origin a800
+
+
 # 训练命令
 echo "$(date): 开始训练"
 CUDA_VISIBLE_DEVICES=4 python train.py \
@@ -17,6 +25,7 @@ CUDA_VISIBLE_DEVICES=4 python train.py \
 --img_aug \
 --MLM \
 --dataset_name "ORBench" \
+--name "$NAME" \
 --root_dir '/root/worker_gpfs/hzc-comp/prcv_data' \
 --warmup_epochs 580 \
 --lrscheduler exp \
@@ -24,17 +33,17 @@ CUDA_VISIBLE_DEVICES=4 python train.py \
 --step_size 2000 \
 --add_multimodal_layers \
 --img_size 336,336 \
---num_epoch 2000 \
+--num_epoch 1200 \
 --lr 2.4e-5 \
 --ln_lr 1e-3 \
 --weight_decay 4e-5 \
 --lora_backbone_lr 1e-6 \
---lora_lr 2.5 \
---name 600_4
+--lora_lr 2.5 
 
 # 生成kaggle csv
 echo "$(date): 开始生成CSV"
 CUDA_VISIBLE_DEVICES=6 \
-python get_kaggle_csv.py || { echo "生成CSV失败"; exit 1; }
+python get_kaggle_csv.py \
+--config_file "logs/ORBench/h200_${NAME}/configs.yaml"
 
 echo "$(date): a800脚本运行完成"

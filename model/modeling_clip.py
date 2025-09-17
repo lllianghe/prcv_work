@@ -355,6 +355,7 @@ class CLIPTextEmbeddings(nn.Module):
         inputs_embeds: Optional[torch.FloatTensor] = None,
         walk_short_pos: Optional[bool] = False,
     ) -> torch.Tensor:
+        walk_short_pos = False
         seq_length = input_ids.shape[-1] if input_ids is not None else inputs_embeds.shape[-2]
 
         if position_ids is None:

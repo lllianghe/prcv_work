@@ -80,7 +80,7 @@ def get_args():
     parser.add_argument("--stride_size", type=int, default=16)
 
     ######################## text transformer settings ########################
-    parser.add_argument("--text_length", type=int, default=77)
+    parser.add_argument("--text_length", type=int, default=248)
     parser.add_argument("--vocab_size", type=int, default=49408)
 
     ######################## solver ########################

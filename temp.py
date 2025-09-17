@@ -32,7 +32,7 @@ class KaggleInputDataset(Dataset):
         self.json_path = json_path
         self.transform = transform
         self.tokenizer = SimpleTokenizer()
-        self.text_length = 77
+        self.text_length = 248
         self.truncate = True
         self.data = self.load_data()
 

@@ -39,7 +39,7 @@ class BaseDataset(object):
         self.logger.info('\n' + str(table))
 
 
-def tokenize(caption: str, tokenizer, text_length=77, truncate=True) -> torch.LongTensor:
+def tokenize(caption: str, tokenizer, text_length=248, truncate=True) -> torch.LongTensor:
     sot_token = tokenizer.encoder["<|startoftext|>"]
     eot_token = tokenizer.encoder["<|endoftext|>"]
     tokens = [sot_token] + tokenizer.encode(caption) + [eot_token]
@@ -61,7 +61,7 @@ class ImageTextDataset(Dataset):
     def __init__(self,
                  dataset,
                  transform=None,
-                 text_length: int = 77,
+                 text_length: int = 248,
                  truncate: bool = True):
         self.dataset = dataset
         self.transform = transform
@@ -111,7 +111,7 @@ class TextDataset(Dataset):
     def __init__(self,
                  caption_pids,
                  captions,
-                 text_length: int = 77,
+                 text_length: int = 248,
                  truncate: bool = True):
         self.caption_pids = caption_pids
         self.captions = captions
@@ -134,7 +134,7 @@ class ImageTextMLMDataset(Dataset):
     def __init__(self,
                  dataset,
                  transform=None,
-                 text_length: int = 77,
+                 text_length: int = 248,
                  truncate: bool = True):
         self.dataset = dataset
         self.transform = transform
@@ -221,7 +221,7 @@ class ORBenchTrainDataset(Dataset):
     def __init__(self,
                  dataset,
                  transform=None,
-                 text_length: int = 77,
+                 text_length: int = 248,
                  truncate: bool = True):
         self.dataset = dataset
         self.transform = transform
@@ -289,7 +289,7 @@ class ORBenchQueryDataset(Dataset):
                  sk_path,
                  nir_path,
                  transform=None,
-                 text_length: int = 77,
+                 text_length: int = 248,
                  truncate: bool = True):
         self.caption_pids = caption_pids
         self.captions = captions

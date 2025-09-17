@@ -307,7 +307,7 @@ class FGCLIPModel(CLIPModel):
         output_attentions: Optional[bool] = None,
         output_hidden_states: Optional[bool] = None,
         return_dict: Optional[bool] = None,
-        walk_short_pos: Optional[bool] = True,
+        walk_short_pos: Optional[bool] = False,
         use_bbox: Optional[bool] = False
     ) -> torch.FloatTensor:
 

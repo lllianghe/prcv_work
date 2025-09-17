@@ -24,7 +24,7 @@ CUDA_VISIBLE_DEVICES=5 \
 python train.py \
 --batch_size 60 \
 --sampler random \
- --num_instance 4 \
+--num_instance 4 \
 --loss_name 'multi_modal_contrastive+itc' \
 --scheduler_period 30 \
 --warmup_epochs 1000 \

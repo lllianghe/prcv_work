@@ -151,126 +151,44 @@ class IRRA(nn.Module):
                                 else:
                                     t_feats_modal = text_feats[torch.arange(text_feats.shape[0]), modal_data.argmax(dim=-1)].float()
 
-                            elif modal_name == 'cp':
-                                _, vis_img_feats, _, _, _ = self.base_model(cp_images=vis_images)
-                                if self.is_safetensors:
-                                    i_feats = vis_img_feats.float()
-                                else:
-                                    i_feats = vis_img_feats[:,0,:].float()
-                                _, cp_img_feats, _, _, _ = self.base_model(cp_images=modal_data)
-                                if self.is_safetensors:
-                                    t_feats_modal = cp_img_feats.float()
-                                else:
-                                    t_feats_modal = cp_img_feats[:,0,:].float()
-
-                            elif modal_name == 'sk':
-                                _, _, vis_img_feats, _, _ = self.base_model(sk_images=vis_images)
-                                if self.is_safetensors:
-                                    i_feats = vis_img_feats.float()
-                                else:
-                                    i_feats = vis_img_feats[:,0,:].float()
-                                _, _, sk_img_feats, _, _ = self.base_model(sk_images=modal_data)
-                                if self.is_safetensors:
-                                    t_feats_modal = sk_img_feats.float()
-                                else:
-                                    t_feats_modal = sk_img_feats[:,0,:].float()
-
-                            elif modal_name == 'nir':
-                                _, _, _, vis_img_feats, _ = self.base_model(nir_images=vis_images)
-                                if self.is_safetensors:
-                                    i_feats = vis_img_feats.float()
-                                else:
-                                    i_feats = vis_img_feats[:,0,:].float()
-                                _, _, _, nir_img_feats, _ = self.base_model(nir_images=modal_data)
-                                if self.is_safetensors:
-                                    t_feats_modal = nir_img_feats.float()
-                                else:
-                                    t_feats_modal = nir_img_feats[:,0,:].float()
+                            else:
+                                vis_img_feats, cp_img_feats, sk_img_feats, nir_img_feats, _ = self.base_model(
+                                    vis_images, cp_images, sk_images, nir_images
+                                )
+                                if modal_name == 'cp':
+                                    if self.is_safetensors:
+                                        i_feats = vis_img_feats.float()
+                                        t_feats_modal = cp_img_feats.float()
+                                    else:
+                                        i_feats = vis_img_feats[:,0,:].float()
+                                        t_feats_modal = cp_img_feats[:,0,:].float()
+                                elif modal_name == 'sk':
+                                    if self.is_safetensors:
+                                        i_feats = vis_img_feats.float()
+                                        t_feats_modal = sk_img_feats.float()
+                                    else:
+                                        i_feats = vis_img_feats[:,0,:].float()
+                                        t_feats_modal = sk_img_feats[:,0,:].float()
+                                elif modal_name == 'nir':
+                                    if self.is_safetensors:
+                                        i_feats = vis_img_feats.float()
+                                        t_feats_modal = nir_img_feats.float()
+                                    else:
+                                        i_feats = vis_img_feats[:,0,:].float()
+                                        t_feats_modal = nir_img_feats[:,0,:].float()
                             
                             # 2.计算原始qg对比学习损失
                             qg_loss = objectives.compute_itc(i_feats, t_feats_modal, logit_scale) / len(query_feats)
                             # qg_loss = 0.8 * qg_loss
+                            ffm_aux_loss = self.base_model.ffm_aux_loss if hasattr(self.base_model, 'ffm_aux_loss') else 0.0
+                            if isinstance(ffm_aux_loss, torch.Tensor) and ffm_aux_loss.item() > 0:
+                                qg_loss += ffm_aux_loss
 
                         if self.autocast_dtype == torch.float16 and scaler is not None:
                             scaler.scale(qg_loss).backward()
                         else:
                             qg_loss.backward()
 
-                        
-                        '''
-                        # 跨模态对比学习：需要重新计算特征因为计算图已被清空
-                        other_modals = [k for k in query_feats.keys() if k != modal_name]
-                        if other_modals:
-                            with autocast(device_type='cuda', dtype=self.autocast_dtype):
-                                # 重新计算当前模态的特征
-                                if modal_name == 'text':
-                                    _, _, _, _, text_feats_new = self.base_model(text=modal_data)
-                                    if self.is_safetensors:
-                                        t_feats_modal_new = text_feats_new.float()
-                                    else:
-                                        t_feats_modal_new = text_feats_new[torch.arange(text_feats_new.shape[0]), modal_data.argmax(dim=-1)].float()
-                                elif modal_name == 'cp':
-                                    _, cp_img_feats_new, _, _, _ = self.base_model(cp_images=modal_data)
-                                    if self.is_safetensors:
-                                        t_feats_modal_new = cp_img_feats_new.float()
-                                    else:
-                                        t_feats_modal_new = cp_img_feats_new[:,0,:].float()
-                                elif modal_name == 'sk':
-                                    _, _, sk_img_feats_new, _, _ = self.base_model(sk_images=modal_data)
-                                    if self.is_safetensors:
-                                        t_feats_modal_new = sk_img_feats_new.float()
-                                    else:
-                                        t_feats_modal_new = sk_img_feats_new[:,0,:].float()
-                                elif modal_name == 'nir':
-                                    _, _, _, nir_img_feats_new, _ = self.base_model(nir_images=modal_data)
-                                    if self.is_safetensors:
-                                        t_feats_modal_new = nir_img_feats_new.float()
-                                    else:
-                                        t_feats_modal_new = nir_img_feats_new[:,0,:].float()
-
-                                # 随机选择一个其他模态
-                                random_modal = random.choice(other_modals)
-                                random_modal_data = query_feats[random_modal]
-                                
-                                # 计算随机选择模态的特征
-                                if random_modal == 'text':
-                                    _, _, _, _, random_text_feats = self.base_model(text=random_modal_data)
-                                    if self.is_safetensors:
-                                        random_feats = random_text_feats.float()
-                                    else:
-                                        random_feats = random_text_feats[torch.arange(random_text_feats.shape[0]), random_modal_data.argmax(dim=-1)].float()
-                                elif random_modal == 'cp':
-                                    _, random_cp_feats, _, _, _ = self.base_model(cp_images=random_modal_data)
-                                    if self.is_safetensors:
-                                        random_feats = random_cp_feats.float()
-                                    else:
-                                        random_feats = random_cp_feats[:,0,:].float()
-                                elif random_modal == 'sk':
-                                    _, _, random_sk_feats, _, _ = self.base_model(sk_images=random_modal_data)
-                                    if self.is_safetensors:
-                                        random_feats = random_sk_feats.float()
-                                    else:
-                                        random_feats = random_sk_feats[:,0,:].float()
-                                elif random_modal == 'nir':
-                                    _, _, _, random_nir_feats, _ = self.base_model(nir_images=random_modal_data)
-                                    if self.is_safetensors:
-                                        random_feats = random_nir_feats.float()
-                                    else:
-                                        random_feats = random_nir_feats[:,0,:].float()
-                                
-                                # 重新计算跨模态对比学习损失
-                                cross_modal_loss = objectives.compute_itc(t_feats_modal_new, random_feats, logit_scale) / len(query_feats)
-                                cross_modal_loss = 0.2 * cross_modal_loss  # 给跨模态损失一个权重
-                            
-                            # 在autocast外面进行跨模态损失的backward
-                            if self.autocast_dtype == torch.float16 and scaler is not None:
-                                scaler.scale(cross_modal_loss).backward()
-                            else:
-                                cross_modal_loss.backward()
-                            
-                            # 更新合并损失用于记录
-                            loss = qg_loss + cross_modal_loss
-                        '''
                         
                         ret.update({f'{modal_name}_itc_Loss': qg_loss.detach()}) # detach后不带计算图, 大写L避免被计入总损失        
                         multi_modal_contrastive_itc_loss += qg_loss
@@ -295,44 +213,39 @@ class IRRA(nn.Module):
                                 else:
                                     t_feats_modal = text_feats[torch.arange(text_feats.shape[0]), modal_data.argmax(dim=-1)].float()
 
-                            elif modal_name == 'cp':
-                                _, vis_img_feats, _, _, _ = self.base_model(cp_images=vis_images)
-                                if self.is_safetensors:
-                                    i_feats = vis_img_feats.float()
-                                else:
-                                    i_feats = vis_img_feats[:,0,:].float()
-                                _, cp_img_feats, _, _, _ = self.base_model(cp_images=modal_data)
-                                if self.is_safetensors:
-                                    t_feats_modal = cp_img_feats.float()
-                                else:
-                                    t_feats_modal = cp_img_feats[:,0,:].float()
-
-                            elif modal_name == 'sk':
-                                _, _, vis_img_feats, _, _ = self.base_model(sk_images=vis_images)
-                                if self.is_safetensors:
-                                    i_feats = vis_img_feats.float()
-                                else:
-                                    i_feats = vis_img_feats[:,0,:].float()
-                                _, _, sk_img_feats, _, _ = self.base_model(sk_images=modal_data)
-                                if self.is_safetensors:
-                                    t_feats_modal = sk_img_feats.float()
-                                else:
-                                    t_feats_modal = sk_img_feats[:,0,:].float()
-
-                            elif modal_name == 'nir':
-                                _, _, _, vis_img_feats, _ = self.base_model(nir_images=vis_images)
-                                if self.is_safetensors:
-                                    i_feats = vis_img_feats.float()
-                                else:
-                                    i_feats = vis_img_feats[:,0,:].float()
-                                _, _, _, nir_img_feats, _ = self.base_model(nir_images=modal_data)
-                                if self.is_safetensors:
-                                    t_feats_modal = nir_img_feats.float()
-                                else:
-                                    t_feats_modal = nir_img_feats[:,0,:].float()
+                            else:
+                                vis_img_feats, cp_img_feats, sk_img_feats, nir_img_feats, _ = self.base_model(
+                                    vis_images, cp_images, sk_images, nir_images
+                                )
+                                if modal_name == 'cp':
+                                    if self.is_safetensors:
+                                        i_feats = vis_img_feats.float()
+                                        t_feats_modal = cp_img_feats.float()
+                                    else:
+                                        i_feats = vis_img_feats[:,0,:].float()
+                                        t_feats_modal = cp_img_feats[:,0,:].float()
+                                elif modal_name == 'sk':
+                                    if self.is_safetensors:
+                                        i_feats = vis_img_feats.float()
+                                        t_feats_modal = sk_img_feats.float()
+                                    else:
+                                        i_feats = vis_img_feats[:,0,:].float()
+                                        t_feats_modal = sk_img_feats[:,0,:].float()
+                                elif modal_name == 'nir':
+                                    if self.is_safetensors:
+                                        i_feats = vis_img_feats.float()
+                                        t_feats_modal = nir_img_feats.float()
+                                    else:
+                                        i_feats = vis_img_feats[:,0,:].float()
+                                        t_feats_modal = nir_img_feats[:,0,:].float()
 
                             # 2.计算loss
                             loss = objectives.compute_sdm(i_feats, t_feats_modal, batch['pids'], logit_scale) / len(query_feats)
+
+                        ffm_aux_loss = self.base_model.ffm_aux_loss if hasattr(self.base_model, 'ffm_aux_loss') else 0.0
+                        if isinstance(ffm_aux_loss, torch.Tensor) and ffm_aux_loss.item() > 0:
+                            loss += ffm_aux_loss
+                            
                         ret.update({f'{modal_name}_sdm_Loss': loss.detach()}) # .detach()后不带计算图, 大写L避免被计入总损失
                         # 根据精度类型决定是否使用scaler
                         if self.autocast_dtype == torch.float16 and scaler is not None:
@@ -360,127 +273,44 @@ class IRRA(nn.Module):
                                 else:
                                     t_feats_modal = text_feats[torch.arange(text_feats.shape[0]), modal_data.argmax(dim=-1)].float()
 
-                            elif modal_name == 'cp':
-                                vis_img_feats, _, _, _, _ = self.base_model(vis_images=vis_images)
-                                if self.is_safetensors:
-                                    i_feats = vis_img_feats.float()
-                                else:
-                                    i_feats = vis_img_feats[:,0,:].float()
-                                _, cp_img_feats, _, _, _ = self.base_model(cp_images=modal_data)
-                                if self.is_safetensors:
-                                    t_feats_modal = cp_img_feats.float()
-                                else:
-                                    t_feats_modal = cp_img_feats[:,0,:].float()
-
-                            elif modal_name == 'sk':
-                                vis_img_feats, _, _, _, _ = self.base_model(vis_images=vis_images)
-                                if self.is_safetensors:
-                                    i_feats = vis_img_feats.float()
-                                else:
-                                    i_feats = vis_img_feats[:,0,:].float()
-                                _, _, sk_img_feats, _, _ = self.base_model(sk_images=modal_data)
-                                if self.is_safetensors:
-                                    t_feats_modal = sk_img_feats.float()
-                                else:
-                                    t_feats_modal = sk_img_feats[:,0,:].float()
-
-                            elif modal_name == 'nir':
-                                vis_img_feats, _, _, _, _ = self.base_model(vis_images=vis_images)
-                                if self.is_safetensors:
-                                    i_feats = vis_img_feats.float()
-                                else:
-                                    i_feats = vis_img_feats[:,0,:].float()
-                                _, _, _, nir_img_feats, _ = self.base_model(nir_images=modal_data)
-                                if self.is_safetensors:
-                                    t_feats_modal = nir_img_feats.float()
-                                else:
-                                    t_feats_modal = nir_img_feats[:,0,:].float()
+                            else:
+                                vis_img_feats, cp_img_feats, sk_img_feats, nir_img_feats, _ = self.base_model(
+                                    vis_images, cp_images, sk_images, nir_images
+                                )
+                                if modal_name == 'cp':
+                                    if self.is_safetensors:
+                                        i_feats = vis_img_feats.float()
+                                        t_feats_modal = cp_img_feats.float()
+                                    else:
+                                        i_feats = vis_img_feats[:,0,:].float()
+                                        t_feats_modal = cp_img_feats[:,0,:].float()
+                                elif modal_name == 'sk':
+                                    if self.is_safetensors:
+                                        i_feats = vis_img_feats.float()
+                                        t_feats_modal = sk_img_feats.float()
+                                    else:
+                                        i_feats = vis_img_feats[:,0,:].float()
+                                        t_feats_modal = sk_img_feats[:,0,:].float()
+                                elif modal_name == 'nir':
+                                    if self.is_safetensors:
+                                        i_feats = vis_img_feats.float()
+                                        t_feats_modal = nir_img_feats.float()
+                                    else:
+                                        i_feats = vis_img_feats[:,0,:].float()
+                                        t_feats_modal = nir_img_feats[:,0,:].float()
                             
                             # 2.计算原始qg对比学习损失
                             qg_loss = objectives.compute_itc(i_feats, t_feats_modal, logit_scale) / len(query_feats)
                             # qg_loss = 0.8 * qg_loss
 
+                            ffm_aux_loss = self.base_model.ffm_aux_loss if hasattr(self.base_model, 'ffm_aux_loss') else 0.0
+                            if isinstance(ffm_aux_loss, torch.Tensor) and ffm_aux_loss.item() > 0:
+                                qg_loss += ffm_aux_loss
+
                         if self.autocast_dtype == torch.float16 and scaler is not None:
                             scaler.scale(qg_loss).backward()
                         else:
                             qg_loss.backward()
-
-
-                        
-                        '''
-                        # 跨模态对比学习：需要重新计算特征因为计算图已被清空
-                        other_modals = [k for k in query_feats.keys() if k != modal_name]
-                        if other_modals:
-                            with autocast(device_type='cuda', dtype=self.autocast_dtype):
-                                # 重新计算当前模态的特征
-                                if modal_name == 'text':
-                                    _, _, _, _, text_feats_new = self.base_model(text=modal_data)
-                                    if self.is_safetensors:
-                                        t_feats_modal_new = text_feats_new.float()
-                                    else:
-                                        t_feats_modal_new = text_feats_new[torch.arange(text_feats_new.shape[0]), modal_data.argmax(dim=-1)].float()
-                                elif modal_name == 'cp':
-                                    _, cp_img_feats_new, _, _, _ = self.base_model(cp_images=modal_data)
-                                    if self.is_safetensors:
-                                        t_feats_modal_new = cp_img_feats_new.float()
-                                    else:
-                                        t_feats_modal_new = cp_img_feats_new[:,0,:].float()
-                                elif modal_name == 'sk':
-                                    _, _, sk_img_feats_new, _, _ = self.base_model(sk_images=modal_data)
-                                    if self.is_safetensors:
-                                        t_feats_modal_new = sk_img_feats_new.float()
-                                    else:
-                                        t_feats_modal_new = sk_img_feats_new[:,0,:].float()
-                                elif modal_name == 'nir':
-                                    _, _, _, nir_img_feats_new, _ = self.base_model(nir_images=modal_data)
-                                    if self.is_safetensors:
-                                        t_feats_modal_new = nir_img_feats_new.float()
-                                    else:
-                                        t_feats_modal_new = nir_img_feats_new[:,0,:].float()
-
-                                # 随机选择一个其他模态
-                                random_modal = random.choice(other_modals)
-                                random_modal_data = query_feats[random_modal]
-                                
-                                # 计算随机选择模态的特征
-                                if random_modal == 'text':
-                                    _, _, _, _, random_text_feats = self.base_model(text=random_modal_data)
-                                    if self.is_safetensors:
-                                        random_feats = random_text_feats.float()
-                                    else:
-                                        random_feats = random_text_feats[torch.arange(random_text_feats.shape[0]), random_modal_data.argmax(dim=-1)].float()
-                                elif random_modal == 'cp':
-                                    _, random_cp_feats, _, _, _ = self.base_model(cp_images=random_modal_data)
-                                    if self.is_safetensors:
-                                        random_feats = random_cp_feats.float()
-                                    else:
-                                        random_feats = random_cp_feats[:,0,:].float()
-                                elif random_modal == 'sk':
-                                    _, _, random_sk_feats, _, _ = self.base_model(sk_images=random_modal_data)
-                                    if self.is_safetensors:
-                                        random_feats = random_sk_feats.float()
-                                    else:
-                                        random_feats = random_sk_feats[:,0,:].float()
-                                elif random_modal == 'nir':
-                                    _, _, _, random_nir_feats, _ = self.base_model(nir_images=random_modal_data)
-                                    if self.is_safetensors:
-                                        random_feats = random_nir_feats.float()
-                                    else:
-                                        random_feats = random_nir_feats[:,0,:].float()
-                                
-                                # 重新计算跨模态对比学习损失
-                                cross_modal_loss = objectives.compute_itc(t_feats_modal_new, random_feats, logit_scale) / len(query_feats)
-                                cross_modal_loss = 0.2 * cross_modal_loss  # 给跨模态损失一个权重
-                            
-                            # 在autocast外面进行跨模态损失的backward
-                            if self.autocast_dtype == torch.float16 and scaler is not None:
-                                scaler.scale(cross_modal_loss).backward()
-                            else:
-                                cross_modal_loss.backward()
-                            
-                            # 更新合并损失用于记录
-                            loss = qg_loss + cross_modal_loss
-                        '''
                         
                         ret.update({f'{modal_name}_itc_Loss': qg_loss.detach()}) # detach后不带计算图, 大写L避免被计入总损失        
                         multi_modal_contrastive_itc_loss += qg_loss
@@ -505,44 +335,39 @@ class IRRA(nn.Module):
                                 else:
                                     t_feats_modal = text_feats[torch.arange(text_feats.shape[0]), modal_data.argmax(dim=-1)].float()
 
-                            elif modal_name == 'cp':
-                                vis_img_feats, _, _, _, _ = self.base_model(vis_images=vis_images)
-                                if self.is_safetensors:
-                                    i_feats = vis_img_feats.float()
-                                else:
-                                    i_feats = vis_img_feats[:,0,:].float()
-                                _, cp_img_feats, _, _, _ = self.base_model(cp_images=modal_data)
-                                if self.is_safetensors:
-                                    t_feats_modal = cp_img_feats.float()
-                                else:
-                                    t_feats_modal = cp_img_feats[:,0,:].float()
-
-                            elif modal_name == 'sk':
-                                vis_img_feats, _, _, _, _ = self.base_model(vis_images=vis_images)
-                                if self.is_safetensors:
-                                    i_feats = vis_img_feats.float()
-                                else:
-                                    i_feats = vis_img_feats[:,0,:].float()
-                                _, _, sk_img_feats, _, _ = self.base_model(sk_images=modal_data)
-                                if self.is_safetensors:
-                                    t_feats_modal = sk_img_feats.float()
-                                else:
-                                    t_feats_modal = sk_img_feats[:,0,:].float()
-
-                            elif modal_name == 'nir':
-                                vis_img_feats, _, _, _, _ = self.base_model(vis_images==vis_images)
-                                if self.is_safetensors:
-                                    i_feats = vis_img_feats.float()
-                                else:
-                                    i_feats = vis_img_feats[:,0,:].float()
-                                _, _, _, nir_img_feats, _ = self.base_model(nir_images=modal_data)
-                                if self.is_safetensors:
-                                    t_feats_modal = nir_img_feats.float()
-                                else:
-                                    t_feats_modal = nir_img_feats[:,0,:].float()
+                            else:
+                                vis_img_feats, cp_img_feats, sk_img_feats, nir_img_feats, _ = self.base_model(
+                                    vis_images, cp_images, sk_images, nir_images
+                                )
+                                if modal_name == 'cp':
+                                    if self.is_safetensors:
+                                        i_feats = vis_img_feats.float()
+                                        t_feats_modal = cp_img_feats.float()
+                                    else:
+                                        i_feats = vis_img_feats[:,0,:].float()
+                                        t_feats_modal = cp_img_feats[:,0,:].float()
+                                elif modal_name == 'sk':
+                                    if self.is_safetensors:
+                                        i_feats = vis_img_feats.float()
+                                        t_feats_modal = sk_img_feats.float()
+                                    else:
+                                        i_feats = vis_img_feats[:,0,:].float()
+                                        t_feats_modal = sk_img_feats[:,0,:].float()
+                                elif modal_name == 'nir':
+                                    if self.is_safetensors:
+                                        i_feats = vis_img_feats.float()
+                                        t_feats_modal = nir_img_feats.float()
+                                    else:
+                                        i_feats = vis_img_feats[:,0,:].float()
+                                        t_feats_modal = nir_img_feats[:,0,:].float()
 
                             # 2.计算loss
                             loss = objectives.compute_sdm(i_feats, t_feats_modal, batch['pids'], logit_scale) / len(query_feats)
+
+                        ffm_aux_loss = self.base_model.ffm_aux_loss if hasattr(self.base_model, 'ffm_aux_loss') else 0.0
+                        if isinstance(ffm_aux_loss, torch.Tensor) and ffm_aux_loss.item() > 0:
+                            loss += ffm_aux_loss
+
                         ret.update({f'{modal_name}_sdm_Loss': loss.detach()}) # .detach()后不带计算图, 大写L避免被计入总损失
                         # 根据精度类型决定是否使用scaler
                         if self.autocast_dtype == torch.float16 and scaler is not None:

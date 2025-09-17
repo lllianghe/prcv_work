@@ -90,6 +90,8 @@ class FGCLIPModel(CLIPModel):
         # Initialize weights and apply final processing
         self.post_init()
 
+        self.ffm_aux_loss = torch.tensor(0.0) # 初始化辅助损失
+
     @classmethod
     def from_pretrained(cls, pretrained_model_name_or_path, args=None, **kwargs):
         """重写from_pretrained方法以支持args参数传递"""
@@ -417,11 +419,79 @@ class FGCLIPModel(CLIPModel):
 
 
     def forward(self, vis_images=None, cp_images=None, sk_images=None, nir_images=None, text=None):
-        vis_img_feats = self.encode_image(vis_images, modality = 'vis') if vis_images is not None else None # 小写
-        cp_img_feats = self.encode_image(cp_images, modality = 'cp') if cp_images is not None else None
-        sk_img_feats = self.encode_image(sk_images, modality = 'sk') if sk_images is not None else None
-        nir_img_feats = self.encode_image(nir_images, modality = 'nir') if nir_images is not None else None
+        vis_img_feats, cp_img_feats, sk_img_feats, nir_img_feats = None, None, None, None
+        self.ffm_aux_loss = torch.tensor(0.0) # 初始化辅助损失
+
+        # --- 1. 处理 Query 模态 (nir, sk, cp) ---
+        query_tensors = []
+        tensors_size = None
+        flag = False
+        query_modalities = []
+
+        if nir_images is not None and nir_images.abs().sum() > 0: 
+            tensors_size = nir_images.shape
+            flag = True
+        elif sk_images is not None and sk_images.abs().sum() > 0: 
+            tensors_size = sk_images.shape
+            flag = True
+        elif cp_images is not None and cp_images.abs().sum() > 0:
+            tensors_size = cp_images.shape
+            flag = True
+
+        if not flag and vis_images is None and text is None:
+            raise ValueError("At least one of nir_images, sk_images, or cp_images must be provided.")
+        
+        if flag:
+            # 保持固定顺序以方便在 vision_model 中拆分
+            if nir_images is not None:
+                query_tensors.append(nir_images)
+                query_modalities.append('nir')
+            else: query_tensors.append(torch.zeros(tensors_size).to(next(self.parameters()).device))
+            if sk_images is not None:
+                query_tensors.append(sk_images)
+                query_modalities.append('sk')
+            else: query_tensors.append(torch.zeros(tensors_size).to(next(self.parameters()).device))
+            if cp_images is not None:
+                query_tensors.append(cp_images)
+                query_modalities.append('cp')
+            else: query_tensors.append(torch.zeros(tensors_size).to(next(self.parameters()).device))
+
+        if len(query_tensors) == 3: # 只有当三个query模态都存在时才进行融合
+            all_query_images = torch.cat(query_tensors, dim=0)
+            
+            # 将检测到的可用模态列表传递给 vision_model
+            query_vision_outputs = self.vision_model(
+                pixel_values=all_query_images,
+                available_modalities=query_modalities, # << 动态生成的列表
+                return_dict=False
+            )
+            
+            pooled_query_output = query_vision_outputs[1]
+            self.ffm_aux_loss = query_vision_outputs[2] # 获取辅助损失
+
+            # 分离融合后的特征
+            nir_fused_feats, sk_fused_feats, cp_fused_feats = pooled_query_output.chunk(3, dim=0)
+
+            # 应用各自的 projection 层
+            nir_img_feats = self.get_visual_projection_layer('nir')(nir_fused_feats)
+            sk_img_feats = self.get_visual_projection_layer('sk')(sk_fused_feats)
+            cp_img_feats = self.get_visual_projection_layer('cp')(cp_fused_feats)
+
+        # --- 2. 独立处理 Gallery 模态 (vis/rgb) ---
+        if vis_images is not None:
+            # 单独送入 vision_model, 这将触发独立编码模式 (不融合)
+            gallery_vision_outputs = self.vision_model(
+                pixel_values=vis_images,
+                available_modalities=['vis'], # 明确告知是单模态'vis'
+                return_dict=False
+            )
+            pooled_gallery_output = gallery_vision_outputs[1]
+            # 应用 'vis' 的 projection 层
+            vis_img_feats = self.get_visual_projection_layer('vis')(pooled_gallery_output)
+
+        # --- 3. 处理文本模态 (不变) ---
         text_feats = self.encode_text(text) if text is not None else None
+        
         return vis_img_feats, cp_img_feats, sk_img_feats, nir_img_feats, text_feats
     
     

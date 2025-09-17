@@ -36,6 +36,8 @@ from .configuration_clip import CLIPConfig, CLIPTextConfig, CLIPVisionConfig
 # from transformers import CLIPConfig, CLIPTextConfig, CLIPVisionConfig
 from torch.nn import functional as F
 
+from moe_module import MultiModalMoEModule
+
 logger = logging.get_logger(__name__)
 
 _CHECKPOINT_FOR_DOC = "openai/clip-vit-base-patch32"
@@ -45,6 +47,67 @@ CLIP_PRETRAINED_MODEL_ARCHIVE_LIST = [
     # See all CLIP models at https://huggingface.co/models?filter=clip
 ]
 
+class Gen_lack_feature(nn.Module):
+    def __init__(self, model_dim=768, local_experts=1,
+            sharded_count=1,
+            my_config=None, kernel_size=1, stride=1):
+        super().__init__()
+        self.model_dim = model_dim
+        self.conv_1 = nn.Conv1d(model_dim, 1024, 1, bias=True)
+        self.conv_2 = nn.Conv1d(1024, model_dim, 1, bias=True)
+        self.dropout = nn.Dropout(0.1)
+    
+    def forward(self, x, ctx=None):
+        # 简化版本，去掉对ctx的依赖
+        out = self.conv_2(self.dropout(self.conv_1(x.transpose(1, 2)))).transpose(1, 2).contiguous()
+        return out
+
+class Gen_lack_weight(nn.Module):
+    def __init__(self, model_dim=768):
+        super().__init__()
+        self.aapw = torch.nn.AdaptiveAvgPool2d((1, model_dim))
+        self.lw = torch.nn.Linear(model_dim, 1)
+
+    def forward(self, x):
+        out = self.lw(self.aapw(x))
+        return out
+    
+class Gen_lack_feature_Expert(nn.Module):
+    """将 Gen_lack_feature 适配为 MoE 系统的 expert"""
+    def __init__(self, d_model, bottleneck=1024, dropout=0.1):
+        super().__init__()
+        # 使用原有的 Gen_lack_feature
+        self.expert = Gen_lack_feature(model_dim=d_model)
+        self.dropout = nn.Dropout(dropout)
+
+        self._init_weights()
+    
+    def _init_weights(self):
+        """改善权重初始化"""
+        for module in self.expert.modules():
+            if isinstance(module, nn.Conv1d):
+                nn.init.xavier_uniform_(module.weight)
+                if module.bias is not None:
+                    nn.init.zeros_(module.bias)
+
+    def forward(self, x):
+        # 处理维度：(batch_size, seq_len, d_model) -> Gen_lack_feature 需要的格式
+        if x.dim() == 2:
+            # 2D input: (num_tokens, d_model) -> add sequence dimension
+            x = x.unsqueeze(0)  # (1, num_tokens, d_model)
+            squeeze_output = True
+        else:
+            squeeze_output = False
+            
+        # Gen_lack_feature 内部会处理维度转换
+        result = self.expert(x)
+        result = self.dropout(result)
+        
+        # Remove added dimension if input was 2D
+        if squeeze_output:
+            result = result.squeeze(0)  # (num_tokens, d_model)
+            
+        return result
 
 # Copied from transformers.models.bart.modeling_bart._expand_mask
 def _expand_mask(mask: torch.Tensor, dtype: torch.dtype, tgt_len: Optional[int] = None):
@@ -1221,6 +1284,272 @@ class CLIPVisionTransformer(nn.Module):
         self.pre_layrnorm = nn.LayerNorm(embed_dim, eps=config.layer_norm_eps)
         self.encoder = CLIPEncoder(config)
         self.post_layernorm = nn.LayerNorm(embed_dim, eps=config.layer_norm_eps)
+        
+        # 添加多模态融合组件
+        self.gen_lack = True  # 可以通过config控制
+        if self.gen_lack:
+            model_dim = embed_dim
+            num_local_experts = 2
+            
+            # 使用 Gen_lack_feature 作为 expert
+            self.gfmoe = MultiModalMoEModule(
+                d_model=model_dim,
+                num_experts=num_local_experts,
+                top_k=1,  # 选择top-1专家
+                bottleneck=1024,  # 专家网络的瓶颈维度
+                dropout=0.1,
+                use_moe=True,
+                expert_class=Gen_lack_feature_Expert  # 使用自定义的 expert 类
+            )
+            self.aux_loss_weights = 1
+
+            # 创建权重生成网络
+            depth_num = 1
+            self.glw_CS = nn.ModuleList([Gen_lack_weight(model_dim) for i in range(depth_num)])
+            self.glw_CC = nn.ModuleList([Gen_lack_weight(model_dim) for i in range(depth_num)])
+            self.glw_SC = nn.ModuleList([Gen_lack_weight(model_dim) for i in range(depth_num)])
+            self.glw_SS = nn.ModuleList([Gen_lack_weight(model_dim) for i in range(depth_num)])
+            self.softmax = nn.Softmax(dim=1)
+
+    def apply_early_fusion(self, hidden_states, available_modalities, miss_type='nothing'):
+        """
+        应用早期融合策略，自动检测缺失模态并进行补全
+        
+        Args:
+            hidden_states: 输入特征 [3*B, seq_len, hidden_dim]
+            available_modalities: 可用模态列表，如['nir', 'sk', 'cp']（用于记录但不用于判断）
+            miss_type: 保留参数但不使用
+        """
+        if not self.gen_lack or hidden_states.shape[0] % 3 != 0:
+            return hidden_states, torch.tensor(0.0, device=hidden_states.device)
+        
+        B = hidden_states.shape[0] // 3
+        lamda = 0.5
+        aux_loss = torch.tensor(0.0, device=hidden_states.device)
+        
+        # 分割三个模态的特征 (按照nir, sk, cp的顺序)
+        x_chunks = hidden_states.chunk(3, dim=0)
+        x_nir, x_sk, x_cp = x_chunks[0], x_chunks[1], x_chunks[2]
+        
+        # 自动检测哪些模态是缺失的（通过检查是否为零张量）
+        # 设置一个小的阈值来判断是否为零张量
+        threshold = 1e-6
+        
+        # 检查每个模态是否存在（非零）
+        nir_available = x_nir.abs().sum() > threshold
+        sk_available = x_sk.abs().sum() > threshold  
+        cp_available = x_cp.abs().sum() > threshold
+        
+        print(f"Modality availability - NIR: {nir_available}, SK: {sk_available}, CP: {cp_available}")
+        
+        # 根据可用模态情况进行不同的融合策略
+        if nir_available and sk_available and cp_available:
+            # 所有模态都可用，进行完整融合（训练时的情况）
+            print("All modalities available, performing full fusion")
+            x_nir_fused, x_sk_fused, x_cp_fused, aux_loss = self._full_fusion(x_nir, x_sk, x_cp)
+            
+        elif nir_available and sk_available and not cp_available:
+            # NIR和SK可用，需要生成CP
+            print("NIR and SK available, generating CP")
+            x_nir_fused, x_sk_fused, x_cp_fused, aux_loss = self._fusion_generate_cp(x_nir, x_sk, x_cp)
+            
+        elif nir_available and not sk_available and cp_available:
+            # NIR和CP可用，需要生成SK
+            print("NIR and CP available, generating SK")
+            x_nir_fused, x_sk_fused, x_cp_fused, aux_loss = self._fusion_generate_sk(x_nir, x_sk, x_cp)
+            
+        elif not nir_available and sk_available and cp_available:
+            # SK和CP可用，需要生成NIR
+            print("SK and CP available, generating NIR")
+            x_nir_fused, x_sk_fused, x_cp_fused, aux_loss = self._fusion_generate_nir(x_nir, x_sk, x_cp)
+            
+        elif nir_available and not sk_available and not cp_available:
+            # 只有NIR可用，需要生成SK和CP
+            print("Only NIR available, generating SK and CP")
+            x_nir_fused, x_sk_fused, x_cp_fused, aux_loss = self._fusion_only_nir(x_nir, x_sk, x_cp)
+            
+        elif not nir_available and sk_available and not cp_available:
+            # 只有SK可用，需要生成NIR和CP
+            print("Only SK available, generating NIR and CP")
+            x_nir_fused, x_sk_fused, x_cp_fused, aux_loss = self._fusion_only_sk(x_nir, x_sk, x_cp)
+            
+        elif not nir_available and not sk_available and cp_available:
+            # 只有CP可用，需要生成NIR和SK
+            print("Only CP available, generating NIR and SK")
+            x_nir_fused, x_sk_fused, x_cp_fused, aux_loss = self._fusion_only_cp(x_nir, x_sk, x_cp)
+            
+        else:
+            # 没有任何模态可用，返回原始特征
+            print("No modalities available, returning original features")
+            x_nir_fused = x_nir
+            x_sk_fused = x_sk
+            x_cp_fused = x_cp
+        
+        # 重新组合
+        fused_hidden_states = torch.cat((x_nir_fused, x_sk_fused, x_cp_fused), dim=0)
+        
+        return fused_hidden_states, aux_loss
+
+    def _full_fusion(self, x_nir, x_sk, x_cp):
+
+        """所有模态都可用时的完整融合"""
+        try:
+
+            # 仅在 MoE 调用前进行最基本的数值清理
+            def clean_input_for_moe(tensor, name):
+                if torch.isnan(tensor).any():
+                    print(f"Warning: NaN detected in {name} before MoE")
+                    tensor = torch.nan_to_num(tensor, nan=0.0)
+                # 轻微的数值裁剪，避免极值
+                tensor = torch.clamp(tensor, -5.0, 5.0)
+                return tensor
+            
+            x_sk = clean_input_for_moe(x_sk, "x_sk") 
+            x_cp = clean_input_for_moe(x_cp, "x_cp")
+            
+            # SK -> CP  
+            cp_gen_sk, aux_loss_4, _ = self.gfmoe(x_cp)
+            w_cp_sk = self.glw_CS[0](x_cp)
+            w_sk_sk = self.glw_SS[0](x_sk)
+            
+            # CP -> NIR, SK
+            sk_gen_cp, aux_loss_6, _ = self.gfmoe(x_sk)
+            w_sk_cp = self.glw_SC[0](x_sk)
+            w_cp_cp = self.glw_CC[0](x_cp)
+            
+            # 计算融合权重
+            w_sk = self.softmax(torch.cat((w_sk_sk, w_cp_sk), dim=1))  
+            w_cp = self.softmax(torch.cat((w_cp_cp, w_sk_cp), dim=1))
+            
+            # 应用融合
+            x_sk_fused = w_sk[:, 0, :].unsqueeze(1) * x_sk + w_sk[:, 1, :].unsqueeze(1) * cp_gen_sk.squeeze()
+            x_cp_fused = w_cp[:, 0, :].unsqueeze(1) * x_cp + w_cp[:, 1, :].unsqueeze(1) * sk_gen_cp.squeeze()
+            
+            # 计算辅助损失
+            # 汇总辅助损失
+            aux_loss = (aux_loss_4 + aux_loss_6) * self.aux_loss_weights
+            
+            return x_nir, x_sk_fused, x_cp_fused, aux_loss
+            
+        except Exception as e:
+            print(f"Error in full fusion: {e}, using original features")
+            return x_nir, x_sk, x_cp, torch.tensor(0.0, device=x_nir.device)
+
+    def _fusion_generate_cp(self, x_nir, x_sk, x_cp):
+        """NIR和SK可用，生成CP"""
+        try:
+            
+            # 使用NIR和SK生成CP特征 - 正确处理MoE返回值
+            cp_gen_from_sk, aux_loss_2, _ = self.gfmoe(x_sk)
+            
+            # 计算生成CP的权重
+            w_sk_cp = self.glw_NT[0](x_sk)
+            
+            # 生成CP特征
+            x_cp_fused = w_sk_cp
+            
+            # 计算辅助损失
+            aux_loss = aux_loss_2 * self.aux_loss_weights
+                    
+            return x_nir, x_sk, x_cp_fused, aux_loss
+            
+        except Exception as e:
+            print(f"Error in CP generation: {e}, using original features")
+            return x_nir, x_sk, x_cp, torch.tensor(0.0, device=x_nir.device)
+
+    def _fusion_generate_sk(self, x_nir, x_sk, x_cp):
+        """NIR和CP可用，生成SK"""
+        try:
+            
+            # 使用NIR和CP生成SK特征 - 正确处理MoE返回值
+            sk_gen_from_cp, aux_loss_2, _ = self.gfmoe(x_cp)
+            
+            # 生成SK特征
+            x_sk_fused = sk_gen_from_cp
+            
+            # 计算辅助损失
+            aux_loss = aux_loss_2 * self.aux_loss_weights
+                    
+            return x_nir, x_sk_fused, x_cp, aux_loss
+            
+        except Exception as e:
+            print(f"Error in SK generation: {e}, using original features")
+            return x_nir, x_sk, x_cp, torch.tensor(0.0, device=x_nir.device)
+
+    def _fusion_generate_nir(self, x_nir, x_sk, x_cp):
+        """SK和CP可用，生成NIR"""
+        try:
+            
+            # SK和CP之间的相互增强
+            cp_gen_sk, aux_loss_3, _ = self.gfmoe(x_sk)
+            sk_gen_cp, aux_loss_4, _ = self.gfmoe(x_cp)
+
+            w_cp_sk = self.glw_CS[0](x_cp)
+            w_sk_sk = self.glw_SS[0](x_sk)
+
+            w_sk_cp = self.glw_SC[0](x_sk)
+            w_cp_cp = self.glw_CC[0](x_cp)
+            
+            # 融合SK和CP
+            # 计算融合权重
+            w_sk = self.softmax(torch.cat((w_sk_sk, w_cp_sk), dim=1))  
+            w_cp = self.softmax(torch.cat((w_cp_cp, w_sk_cp), dim=1))
+            
+            # 应用融合
+            x_sk_fused = w_sk[:, 0, :].unsqueeze(1) * x_sk + w_sk[:, 1, :].unsqueeze(1) * cp_gen_sk.squeeze()
+            x_cp_fused = w_cp[:, 0, :].unsqueeze(1) * x_cp + w_cp[:, 1, :].unsqueeze(1) * sk_gen_cp.squeeze()
+            
+            # 计算辅助损失
+            aux_loss = (aux_loss_3 + aux_loss_4) * self.aux_loss_weights
+                    
+            return x_nir, x_sk_fused, x_cp_fused, aux_loss
+            
+        except Exception as e:
+            print(f"Error in NIR generation: {e}, using original features")
+            return x_nir, x_sk, x_cp, torch.tensor(0.0, device=x_sk.device)
+
+    def _fusion_only_nir(self, x_nir, x_sk, x_cp):
+        aux_loss = 0
+        return x_nir, x_sk, x_cp, aux_loss
+
+
+    def _fusion_only_sk(self, x_nir, x_sk, x_cp):
+        """只有SK可用，生成NIR和CP"""
+        try:
+            # 使用SK生成NIR和CP - 正确处理MoE返回值
+            cp_generated, aux_loss_2, _ = self.gfmoe(x_sk)
+            
+            x_nir_fused = x_nir
+            x_sk_fused = x_sk
+            x_cp_fused = cp_generated
+            
+            # 计算辅助损失
+            aux_loss = aux_loss_2 * self.aux_loss_weights
+                    
+            return x_nir_fused, x_sk_fused, x_cp_fused, aux_loss
+            
+        except Exception as e:
+            print(f"Error in SK-only fusion: {e}, using original features")
+            return x_nir, x_sk, x_cp, torch.tensor(0.0, device=x_sk.device)
+
+    def _fusion_only_cp(self, x_nir, x_sk, x_cp):
+        """只有CP可用，生成NIR和SK"""
+        try:
+            # 使用CP生成NIR和SK - 正确处理MoE返回值
+            sk_generated, aux_loss_2, _ = self.gfmoe(x_cp)
+            
+            x_nir_fused = x_nir
+            x_sk_fused = sk_generated
+            x_cp_fused = x_cp
+            
+            # 计算辅助损失
+            aux_loss = aux_loss_2 * self.aux_loss_weights
+                    
+            return x_nir_fused, x_sk_fused, x_cp_fused, aux_loss
+            
+        except Exception as e:
+            print(f"Error in CP-only fusion: {e}, using original features")
+            return x_nir, x_sk, x_cp, torch.tensor(0.0, device=x_cp.device)
 
     @add_start_docstrings_to_model_forward(CLIP_VISION_INPUTS_DOCSTRING)
     @replace_return_docstrings(output_type=BaseModelOutputWithPooling, config_class=CLIPVisionConfig)
@@ -1228,14 +1557,18 @@ class CLIPVisionTransformer(nn.Module):
         self,
         pixel_values: Optional[torch.FloatTensor] = None,
         modality = '',
+        available_modalities: Optional[list] = None,
         output_attentions: Optional[bool] = None,
         output_hidden_states: Optional[bool] = None,
         return_dict: Optional[bool] = None,
         interpolate_pos_encoding = True,
     ) -> Union[Tuple, BaseModelOutputWithPooling]:
         r"""
+        Args:
+            available_modalities: 可用模态列表，用于多模态融合
+        
         Returns:
-
+        
         """
         output_attentions = output_attentions if output_attentions is not None else self.config.output_attentions
         output_hidden_states = (
@@ -1247,6 +1580,12 @@ class CLIPVisionTransformer(nn.Module):
             raise ValueError("You have to specify pixel_values")
 
         hidden_states = self.embeddings(pixel_values, interpolate_pos_encoding=interpolate_pos_encoding, modality=modality)
+        
+        # 应用早期融合（如果有多个模态）
+        aux_loss = torch.tensor(0.0, device=hidden_states.device)
+        if available_modalities and len(available_modalities) > 1:
+            hidden_states, aux_loss = self.apply_early_fusion(hidden_states, available_modalities)
+        
         hidden_states = self.pre_layrnorm(hidden_states)
 
         encoder_outputs = self.encoder(
@@ -1261,8 +1600,10 @@ class CLIPVisionTransformer(nn.Module):
         pooled_output = self.post_layernorm(pooled_output)
 
         if not return_dict:
-            return (last_hidden_state, pooled_output) + encoder_outputs[1:]
-
+            return (last_hidden_state, pooled_output, aux_loss) + encoder_outputs[1:]
+        
+        # 临时存放
+        self._last_aux_loss = aux_loss
         return BaseModelOutputWithPooling(
             last_hidden_state=last_hidden_state,
             pooler_output=pooled_output,
@@ -1322,13 +1663,24 @@ class CLIPVisionModel(CLIPPreTrainedModel):
         ```"""
         return_dict = return_dict if return_dict is not None else self.config.use_return_dict
 
-        return self.vision_model(
+        vision_transformer_output = self.vision_model(
             pixel_values=pixel_values,
             output_attentions=output_attentions,
             output_hidden_states=output_hidden_states,
             return_dict=return_dict,
             interpolate_pos_encoding = interpolate_pos_encoding,
         )
+        
+        # 获取 aux_loss（如果有的话）
+        aux_loss = getattr(self.vision_model, '_last_aux_loss', torch.tensor(0.0))
+        
+        if not return_dict:
+            # 在 tuple 模式下，aux_loss 已经包含在返回值中
+            return vision_transformer_output
+        else:
+            # 在 dict 模式下，将 aux_loss 存储为属性
+            self._last_aux_loss = aux_loss
+            return vision_transformer_output
 
 
 @add_start_docstrings(CLIP_START_DOCSTRING)
@@ -1466,6 +1818,42 @@ class CLIPModel(CLIPPreTrainedModel):
         image_features = self.visual_projection(pooled_output)
 
         return image_features
+    # # 在CLIPModel类中修改get_image_features方法
+    # def get_image_features(
+    #     self,
+    #     pixel_values: Optional[torch.FloatTensor] = None,
+    #     available_modalities: Optional[list] = None,
+    #     output_attentions: Optional[bool] = None,
+    #     output_hidden_states: Optional[bool] = None,
+    #     return_dict: Optional[bool] = None,
+    #     interpolate_pos_encoding = False,
+    #     modality: str = '',
+    # ) -> torch.FloatTensor:
+    #     r"""
+    #     Args:
+    #         available_modalities: 可用模态列表，用于多模态融合
+    #     """
+    #     # Use CLIP model's config for some fields (if specified) instead of those of vision & text components.
+    #     output_attentions = output_attentions if output_attentions is not None else self.config.output_attentions
+    #     output_hidden_states = (
+    #         output_hidden_states if output_hidden_states is not None else self.config.output_hidden_states
+    #     )
+    #     return_dict = return_dict if return_dict is not None else self.config.use_return_dict
+
+    #     vision_outputs = self.vision_model(
+    #         pixel_values=pixel_values,
+    #         modality=modality,
+    #         available_modalities=available_modalities,
+    #         output_attentions=output_attentions,
+    #         output_hidden_states=output_hidden_states,
+    #         return_dict=return_dict,
+    #         interpolate_pos_encoding = interpolate_pos_encoding,
+    #     )
+
+    #     pooled_output = vision_outputs[1]  # pooled_output
+    #     image_features = self.visual_projection(pooled_output)
+
+    #     return image_features
 
     @add_start_docstrings_to_model_forward(CLIP_INPUTS_DOCSTRING)
     @replace_return_docstrings(output_type=CLIPOutput, config_class=CLIPConfig)

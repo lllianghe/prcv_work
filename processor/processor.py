@@ -359,7 +359,10 @@ def do_train(start_epoch, args, model, train_loader, evaluator, optimizer,
                 if args.distributed:
                     r1, mAP, single_modal_mAPs = evaluator.eval(model.module.eval())
                 else:
-                    r1, mAP, single_modal_mAPs = evaluator.eval(model.eval())
+                    if args.modalities != 'all':
+                        r1, mAP, single_modal_mAPs = evaluator.eval(model.eval(), modalities=["onemodal_SK", "onemodal_NIR", "onemodal_CP", "onemodal_TEXT"])
+                    else:
+                        r1, mAP, single_modal_mAPs = evaluator.eval(model.eval())
                 
                 eval_epoch_list.append(epoch)
                 mAP_list.append(mAP)
@@ -384,10 +387,6 @@ def do_train(start_epoch, args, model, train_loader, evaluator, optimizer,
                 # wandb.log({"message": f"best mAP: {best_mAP} at epoch {arguments['best_mAP_epoch']}"})
                 """
                 
-        if epoch >= 400 and epoch % 200 == 0:
-            checkpointer.save(f"best_{epoch}", **arguments)
-                
-
         if epoch == num_epoch:
             arguments["best_mAP_epoch"] = epoch
             checkpointer.save("best", **arguments)

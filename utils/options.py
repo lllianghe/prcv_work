@@ -36,6 +36,7 @@ def get_args():
                         help='Add multimodal layers when loading checkpoint. '
                              'When True, loads single-modal checkpoint and automatically adds multimodal layers. '
                              'When False, loads multimodal checkpoint in strict mode.')
+    parser.add_argument("--modalities", default='all')
 
     ######################## model general settings ########################
     parser.add_argument("--pretrain_choice", default='ViT-B/16') # whether use pretrained model
@@ -104,6 +105,9 @@ def get_args():
     parser.add_argument("--test", dest='training', default=True, action='store_false') # 意思是如果有--test args.trainging就会被设置为true
     parser.add_argument("--test_size", type=float,default=150/400)  # 测试集占总样本的比例
     parser.add_argument("--drop_last", type=bool, default=False)
+
+    ######################## other ########################
+    parser.add_argument("--seed", type=int, default=42)
 
     args = parser.parse_args()
 

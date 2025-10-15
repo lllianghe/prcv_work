@@ -28,6 +28,7 @@ class IRRA(nn.Module):
 
         self.num_classes = num_classes
         self._set_task()
+        self._set_modalities()
 
         self.base_model, base_cfg = build_CLIP_from_openai_pretrained(name = args.pretrain_choice, image_size = args.img_size, stride_size = args.stride_size)
         self.embed_dim = base_cfg['embed_dim']
@@ -82,6 +83,10 @@ class IRRA(nn.Module):
         self.current_task = [l.strip() for l in loss_names.split('+')]
         print(f'Training Model with {self.current_task} tasks')
     
+    def _set_modalities(self):
+        modalities = self.args.modalities
+        self.modalities = [l.strip() for l in modalities.split('+')]
+        print(f'Training Modalities: {self.modalities}')
     
     def cross_former(self, q, k, v):
         x = self.cross_attn(
@@ -132,6 +137,8 @@ class IRRA(nn.Module):
             if 'itc' in self.current_task:
                 multi_modal_contrastive_itc_loss = 0                
                 for modal_name, modal_data in query_feats.items(): # 遍历每个查询模态
+                    if modal_name not in self.modalities:
+                        continue
                     with autocast(device_type='cuda', dtype=self.autocast_dtype):
                         # 1.encoder计算特征
                         if modal_name == 'text':

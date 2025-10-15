@@ -1197,9 +1197,10 @@ class CLIPVisionTransformer(nn.Module):
         """
         # lora
         """
-        self.lora_modules = inject_vision_lora(self.encoder)
-        for lora_module in self.lora_modules:
-            self.add_module(lora_module.lora_name, lora_module)
+        # 可以取消lora功能
+        # self.lora_modules = inject_vision_lora(self.encoder)
+        # for lora_module in self.lora_modules:
+        #     self.add_module(lora_module.lora_name, lora_module)
 
 
     @add_start_docstrings_to_model_forward(CLIP_VISION_INPUTS_DOCSTRING)
@@ -1220,8 +1221,9 @@ class CLIPVisionTransformer(nn.Module):
         """
         lora 切换
         """
-        for lora in self.lora_modules:
-            lora.apply_to(modality=modality)
+        # 可以取消lora功能
+        # for lora in self.lora_modules:
+        #     lora.apply_to(modality=modality)
             
         output_attentions = output_attentions if output_attentions is not None else self.config.output_attentions
         output_hidden_states = (
